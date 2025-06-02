@@ -63,12 +63,6 @@ abstract class AbstractController {
             throw new Exception('LicenseService missing or invalid in services provided to AbstractController.');
         }
         $this->licenseService = $services['licenseService'];
-
-        // Initialize other common services if needed
-        // if (!isset($services['securityService']) || !$services['securityService'] instanceof SecurityService) {
-        //     throw new Exception('SecurityService missing or invalid in services provided to AbstractController.');
-        // }
-        // $this->securityService = $services['securityService'];
     }
 
     /**
@@ -82,31 +76,23 @@ abstract class AbstractController {
      * @throws Exception If the view file is not found (rethrown from ViewRenderer).
      */
     protected function render(string $viewName, array $data = [], bool $withLayout = true, int $statusCode = 200): void {
-        // Set HTTP status code if not already sent
         if (!headers_sent()) {
             http_response_code($statusCode);
         }
 
-        // Prepare common data available to all views and layouts
         $commonViewData = [
             'appName' => $this->config['app']['name'] ?? 'App',
             'baseUrl' => $this->config['app']['base_url'] ?? '/',
             'isLoggedIn' => $this->authService->isLoggedIn(),
-            'loggedInUser' => $this->authService->isLoggedIn() ? $this->authService->getCurrentUser() : null, // Get user info if logged in
+            'loggedInUser' => $this->authService->isLoggedIn() ? $this->authService->getCurrentUser() : null,
             'currentUri' => $_SERVER['REQUEST_URI'] ?? '/',
-            'pageTitle' => $data['page_title'] ?? $this->config['app']['name'] ?? 'Application', // Default page title
-            'flashMessage' => $this->getFlashMessage(), // Get default flash message
-            'flash_license_message' => $this->getFlashMessage('license_message'), // Read specific message if needed
-            // Pass global JSON strings for footer injection
+            'pageTitle' => $data['page_title'] ?? $this->config['app']['name'] ?? 'Application',
+            'flashMessage' => $this->getFlashMessage(),
+            'flash_license_message' => $this->getFlashMessage('license_message'),
             'global_json_strings_for_footer' => $this->config['app']['global_json_strings'] ?? ['fields' => 'null', 'formulas' => 'null', 'error' => 'Global JSON strings not loaded in config'],
-        
-            // Add other global view variables here if needed
         ];
 
-        // Merge common data with specific view data (specific data overrides common data)
         $finalViewData = array_merge($commonViewData, $data);
-
-        // Delegate rendering to the ViewRenderer service
         $this->viewRenderer->render($viewName, $finalViewData, $withLayout);
     }
 
@@ -117,29 +103,20 @@ abstract class AbstractController {
      * @param string $path The application path to redirect to (e.g., '/users', '/login'). Should start with '/'.
      * @param int $statusCode HTTP status code (default 302 Found).
      */
-    #[NoReturn] protected function redirect(string $path, int $statusCode = 302): void {
-        // Ensure path starts with '/' for consistency
+    #[NoReturn]
+    protected function redirect(string $path, int $statusCode = 302): void {
         if (!str_starts_with($path, '/')) {
             $path = '/' . $path;
         }
-        // Construct the full URL using the configured base URL
         $redirectUrl = rtrim($this->config['app']['base_url'] ?? '', '/') . $path;
-
         $this->logger->debug("Redirecting user.", ['to_url' => $redirectUrl, 'status' => $statusCode]);
-
-        // Prevent header injection vulnerabilities (though unlikely with internal paths)
         $redirectUrl = filter_var($redirectUrl, FILTER_SANITIZE_URL);
-
-        // Send Location header
         header('Location: ' . $redirectUrl, true, $statusCode);
-
-        // Terminate script execution
         exit;
     }
 
     /**
      * Sets a flash message in the session.
-     * Flash messages are typically displayed once and then cleared.
      *
      * @param string $message The message text.
      * @param string $type Message type ('success', 'danger', 'warning', 'info').
@@ -148,128 +125,78 @@ abstract class AbstractController {
     protected function setSessionMessage(string $message, string $type = 'info', string $key = 'default'): void {
         if (session_status() !== PHP_SESSION_ACTIVE) {
             $this->logger->warning("Attempted to set session message, but session is not active.");
-            return; // Cannot set message if session isn't running
+            return;
         }
-
         if (!isset($_SESSION['flash_messages'])) {
             $_SESSION['flash_messages'] = [];
         }
         $_SESSION['flash_messages'][$key] = ['text' => $message, 'type' => $type];
         $this->logger->debug("Flash message set.", ['key' => $key, 'type' => $type, 'message' => $message]);
-        
-        // برای اطمینان از ذخیره شدن پیام در سشن
-        session_write_close();
-        session_start();
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            session_write_close();
+            session_start();
+        }
     }
 
     /**
      * Gets a flash message from the session and removes it.
-     * 
-     * @param string $key Session key for the message (default 'default').
+     * * @param string $key Session key for the message (default 'default').
      * @return array|null Message array with 'text' and 'type' keys, or null if not found.
      */
     protected function getFlashMessage(string $key = 'default'): ?array {
-        // ثبت وضعیت سشن در لاگ
-        $this->logger->debug("Session status in getFlashMessage", [
-            'session_status' => session_status(),
-            'session_id' => session_id(),
-            'has_flash_messages' => isset($_SESSION['flash_messages']),
-            'has_key' => isset($_SESSION['flash_messages'][$key]),
-            'key' => $key,
-            'all_keys' => isset($_SESSION['flash_messages']) ? array_keys($_SESSION['flash_messages']) : []
-        ]);
-        
         if (isset($_SESSION['flash_messages'][$key])) {
             $message = $_SESSION['flash_messages'][$key];
-            unset($_SESSION['flash_messages'][$key]); // Clear after reading
-            // Optional: Remove the 'flash_messages' array entirely if it's now empty
+            unset($_SESSION['flash_messages'][$key]);
             if (empty($_SESSION['flash_messages'])) {
                  unset($_SESSION['flash_messages']);
             }
-            $this->logger->debug("Flash message retrieved and cleared.", ['key' => $key, 'message' => $message]);
-            
-            // اگر پیام به صورت رشته باشد، آن را به آرایه تبدیل کنیم
-            if (is_string($message)) {
-                return ['text' => $message, 'type' => 'info'];
-            }
-            
-            return $message;
+            return is_array($message) ? $message : ['text' => $message, 'type' => 'info'];
         }
-        $this->logger->debug("No flash message found for key.", ['key' => $key]);
         return null;
     }
-
+    
     /**
-     * Checks if the user is logged in using AuthService.
+     * NEW: Helper method to send a JSON response and exit script execution.
      *
-     * @return bool True if logged in, false otherwise.
+     * @param array $data The data to encode as JSON.
+     * @param int $statusCode The HTTP status code to send.
      */
+    #[NoReturn]
+    protected function jsonResponse(array $data, int $statusCode = 200): void {
+        if (!headers_sent()) {
+            http_response_code($statusCode);
+            header('Content-Type: application/json; charset=UTF-8');
+        }
+        echo json_encode($data, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
+        exit;
+    }
+
     protected function isLoggedIn(): bool {
-        // Delegate check to AuthService
         return $this->authService->isLoggedIn();
     }
 
-    /**
-     * Requires the user to be logged in.
-     * If not logged in, sets a flash message and redirects to the login page.
-     */
     protected function requireLogin(): void {
         if (!$this->isLoggedIn()) {
             $this->logger->warning("Access denied: Login required.", ['requested_uri' => $_SERVER['REQUEST_URI'] ?? 'N/A']);
             $this->setSessionMessage('برای دسترسی به این صفحه، لطفاً ابتدا وارد شوید.', 'warning');
-            $this->redirect('/login'); // Assumes login route is '/login'
+            $this->redirect('/login');
         }
     }
 
-    /**
-     * Requires a valid and active license.
-     * If the license is invalid, sets a flash message and redirects to the activation page.
-     */
-    //protected function requireLicense(): void {
-    //    try {
-    //        $licenseCheck = $this->licenseService->checkLicense();
-    //        if (!$licenseCheck['valid']) {
-    //            $this->logger->warning("Access denied: Invalid or inactive license.", ['message' => $licenseCheck['message']]);
-    //            $this->setSessionMessage($licenseCheck['message'] ?: 'سامانه نیاز به فعال‌سازی دارد.', 'warning', 'license_message'); // Use specific key
-    //            $this->redirect('/activate'); // Assumes activation route is '/activate'
-    //        }
-    //    } catch (Throwable $e) {
-    //        // Handle potential errors during license check itself
-    //        $this->logger->critical("Critical error during license check enforcement.", ['exception' => $e]);
-    //        // Redirect to an error page or activation page with a generic error
-    //        $this->setSessionMessage('خطای سیستمی در بررسی وضعیت فعال‌سازی رخ داد.', 'danger');
-    //        // Depending on severity, maybe redirect to login or a specific error display?
-    //         $this->redirect('/activate'); // Redirecting to activate might be safest
-    //    }
-    //}
-
-    /**
-     * Checks if the current logged-in user has administrator privileges.
-     * **Placeholder:** Needs implementation based on how roles/permissions are stored.
-     *
-     * @return bool True if the user is an admin, false otherwise.
-     */
     protected function userIsAdmin(): bool {
         $userRoleId = $_SESSION['user_role'] ?? null;
-        return ($userRoleId === 1 || $userRoleId === '1' || strtolower($userRoleId) === 'admin');
+        return ($userRoleId === 1 || $userRoleId === '1' || strtolower((string)$userRoleId) === 'admin');
     }
 
-    /**
-     * Requires administrator privileges. Redirects if the user is not an admin.
-     */
-     protected function requireAdmin(): void {
-          $this->requireLogin(); // Must be logged in first
-          if (!$this->userIsAdmin()) {
-               $this->logger->warning("Access denied: Admin privileges required.", [
-                   'user_id' => $_SESSION['user_id'] ?? null,
-                   'requested_uri' => $_SERVER['REQUEST_URI'] ?? 'N/A'
-               ]);
-               $this->setSessionMessage('شما دسترسی لازم برای مشاهده این بخش را ندارید.', 'danger');
-               $this->redirect('/app/dashboard'); // Redirect to dashboard or a specific 'access denied' page
-          }
-     }
-
-
-    // Add other common helper methods as needed (e.g., checkPermission, getUser)
-
-} // End AbstractController class
+    protected function requireAdmin(): void {
+        $this->requireLogin();
+        if (!$this->userIsAdmin()) {
+            $this->logger->warning("Access denied: Admin privileges required.", [
+                'user_id' => $_SESSION['user_id'] ?? null,
+                'requested_uri' => $_SERVER['REQUEST_URI'] ?? 'N/A'
+            ]);
+            $this->setSessionMessage('شما دسترسی لازم برای مشاهده این بخش را ندارید.', 'danger');
+            $this->redirect('/app/dashboard');
+        }
+    }
+}

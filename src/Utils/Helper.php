@@ -1,62 +1,103 @@
 <?php
 
-namespace App\Utils; // Namespace مطابق با پوشه src/Utils
+namespace App\Utils;
 
-use PDO; // برای Type Hinting در متدهای دیتابیس (که بهتر است به Repository ها منتقل شوند)
-use PDOException; // برای گرفتن خطاهای دیتابیس
-use Monolog\Logger; // برای استفاده از لاگر تزریق شده
-use Exception; // برای خطاهای عمومی
-use NumberFormatter; // برای فرمت اعداد با intl
-use DateTime; // برای کار با تاریخ
-use App\Core\CSRFProtector; // برای کار با توکن CSRF
+use PDO;
+use PDOException;
+use Monolog\Logger;
+use Exception;
+use NumberFormatter;
+use DateTime;
+use App\Core\CSRFProtector;
+use Morilog\Jalali\Jalalian; // FIX: Add use statement for Jalalian
 
 /**
  * کلاس Helper برای توابع کمکی عمومی.
- * توابع سراسری از functions.php به متدهای static این کلاس منتقل می شوند.
- * وابستگی ها (مانند Logger) از طریق متدهای static (یا در آینده از طریق DI برای متدهای غیر static) تزریق می شوند.
  */
 class Helper {
 
-    // نمونه Logger برای استفاده در متدهای static
     private static ?Logger $logger = null;
-    private static ?array $config = null; // برای دسترسی به تنظیمات در متدهای static
-    private static ?array $messages = null; // برای دسترسی به آرایه پیام‌ها
+    private static ?array $config = null;
+    private static ?array $messages = null;
 
-    /**
-     * متد برای تنظیم لاگر و تنظیمات در کلاس Helper.
-     * این متد باید یک بار در ابتدای public/index.php فراخوانی شود.
-     *
-     * @param Logger $logger نمونه Monolog Logger.
-     * @param array $config آرایه کامل تنظیمات برنامه.
-     */
     public static function initialize(Logger $logger, array $config): void {
         self::$logger = $logger;
         self::$config = $config;
-
-        // بارگذاری فایل پیام‌ها
-        $messagesFilePath = realpath(__DIR__ . '/../../config/messages.php');
-        if ($messagesFilePath && file_exists($messagesFilePath)) {
-            self::$messages = require $messagesFilePath;
-        } else {
-            // اگر فایل پیام‌ها پیدا نشد، یک لاگ خطا ثبت کنید
-            self::logError('Messages file not found.', ['path' => $messagesFilePath ?? 'config/messages.php']);
-            self::$messages = []; // آرایه خالی برای جلوگیری از خطا
+        
+        // Load messages from file if not already loaded
+        if (self::$messages === null) {
+            $messagesFile = $config['paths']['src'] . '/messages.php';
+            if (file_exists($messagesFile)) {
+                self::$messages = require $messagesFile;
+            } else {
+                self::$messages = [];
+                $logger->warning("Messages file not found at: " . $messagesFile);
+            }
         }
     }
 
+    public static function escapeHtml(mixed $value): string {
+        return htmlspecialchars((string)$value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+    }
 
+    public static function generateCsrfToken(): string {
+        return CSRFProtector::generateToken();
+    }
+
+    public static function verifyCsrfToken(?string $token): bool {
+        return CSRFProtector::validateToken($token);
+    }
+    
     /**
-     * ثبت فعالیت در سیستم.
-     * منطق لاگ‌برداری از توابع log_activity در functions.php و logger.php به این متد منتقل شده.
-     * از لاگر Monolog تزریق شده استفاده می‌کند.
-     * ذخیره در دیتابیس نیز در اینجا انجام می‌شود (اگرچه بهتر است به یک Repository اختصاصی منتقل شود).
+     * FIX: اضافه کردن متد parseJalaliDateToSql
+     * این متد یک تاریخ شمسی (مانند '1403/04/02') را به فرمت SQL (مانند '2024-06-22') تبدیل می‌کند.
      *
-     * @param PDO|null $db نمونه PDO متصل به دیتابیس (نیاز به تزریق در متد static).
-     * @param string $message پیام لاگ.
-     * @param string $actionType نوع عملیات (مانند LOGIN, UPDATE_PROFILE, BACKUP).
-     * @param string $level سطح لاگ (مانند INFO, WARNING, ERROR).
-     * @param array $data داده‌های اضافی.
+     * @param string|null $jalaliDate رشته تاریخ شمسی
+     * @param bool $endOfDay اگر true باشد، زمان را به 23:59:59 برای انتهای روز تنظیم می‌کند
+     * @return string|null تاریخ میلادی در فرمت SQL یا null اگر ورودی نامعتبر باشد
      */
+    public static function parseJalaliDateToSql(?string $jalaliDate, bool $endOfDay = false): ?string {
+        if (empty($jalaliDate)) {
+            return null;
+        }
+        try {
+            // جدا کردن بخش تاریخ در صورتی که زمان هم وجود داشته باشد
+            $datePart = preg_replace('#\s.*#', '', $jalaliDate);
+            $parts = preg_split('/[-\/]/', $datePart);
+            
+            if (count($parts) === 3 && ctype_digit($parts[0]) && ctype_digit($parts[1]) && ctype_digit($parts[2])) {
+                $gregorian = Jalalian::fromFormat('Y/m/d', implode('/', $parts))->toCarbon();
+                if ($endOfDay) {
+                    return $gregorian->endOfDay()->toDateTimeString();
+                }
+                return $gregorian->toDateString();
+            }
+            return null;
+        } catch (\Exception $e) {
+            self::$logger?->warning('Failed to parse Jalali date to SQL format.', ['date' => $jalaliDate, 'error' => $e->getMessage()]);
+            return null;
+        }
+    }
+    
+    /**
+     * FIX: اضافه کردن متد parseJalaliDatetimeToSql
+     * این متد یک تاریخ و زمان شمسی (مانند '1403/04/02 15:30:00') را به فرمت SQL تبدیل می‌کند.
+     *
+     * @param string|null $jalaliDatetime رشته تاریخ و زمان شمسی
+     * @return string|null تاریخ و زمان میلادی در فرمت SQL یا null اگر ورودی نامعتبر باشد
+     */
+    public static function parseJalaliDatetimeToSql(?string $jalaliDatetime): ?string {
+        if (empty($jalaliDatetime)) {
+            return null;
+        }
+        try {
+            return Jalalian::fromFormat('Y/m/d H:i:s', $jalaliDatetime)->toCarbon()->toDateTimeString();
+        } catch (\Exception $e) {
+            self::$logger?->warning('Failed to parse Jalali datetime to SQL format.', ['datetime' => $jalaliDatetime, 'error' => $e->getMessage()]);
+            return null;
+        }
+    }
+
     public static function logActivity(?PDO $db, string $message, string $actionType = 'GENERAL', string $level = 'INFO', array $data = []): void {
         // استفاده از لاگر Monolog تزریق شده
         if (self::$logger) {
@@ -156,75 +197,41 @@ class Helper {
         }
     }
 
-    /**
-     * Securely escapes HTML special characters.
-     * منطق از escape_html در functions.php منتقل شده.
-     *
-     * @param string|null $string Input string.
-     * @return string Escaped string.
-     */
-    public static function escapeHtml(?string $string): string {
-        if ($string === null) return '';
-        return htmlspecialchars($string, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+    // ... سایر متدهای کلاس Helper ...
+    public static function getMessageText(string $key, ?string $default = null): string {
+        // Check if messages array is loaded and key exists
+        if (self::$messages !== null && array_key_exists($key, self::$messages)) {
+            return self::$messages[$key];
+        }
+
+        // Log warning if message key is not found
+        self::logWarning('Message key not found.', ['key' => $key]);
+
+        // Return key wrapped in ## if debug is on, otherwise return default or key
+        if ((self::$config['app']['debug'] ?? false) && $default === null) {
+            return "##{$key}##";
+        }
+
+        return $default ?? $key; // Return default or the key itself as fallback
+    }
+    
+    private static function logWarning(string $message, array $context = []): void {
+        if (self::$logger) {
+            self::$logger->warning($message, $context);
+        } else {
+            error_log("Helper Warning (Monolog not ready): " . $message);
+        }
     }
 
-     /**
-      * Sanitizes a number string, removing formatting characters and ensuring validity.
-      * Logic from sanitize_formatted_number in functions.php.
-      *
-      * @param string|null $numberStr Input number string (e.g., "1,234.50").
-      * @return string Cleaned number string, or an empty string for invalid input. Returns null if input is null.
-      */
-     public static function sanitizeFormattedNumber(?string $numberStr): ?string {
-         if ($numberStr === null) return null;
-
-         // 1. Trim whitespace
-         $cleaned = trim($numberStr);
-
-         // 2. Remove commas (thousands separators)
-         $cleaned = str_replace(',', '', $cleaned);
-
-         // 3. Convert Persian/Arabic digits and decimal separators to English
-         $cleaned = strtr($cleaned, [
-             '۰'=>'0','۱'=>'1','۲'=>'2','۳'=>'3','۴'=>'4',
-             '۵'=>'5','۶'=>'6','۷'=>'7','۸'=>'8','۹'=>'9',
-             '٫'=>'.','،'=>'.' // Persian and Arabic decimal/thousands separators
-         ]);
-
-         // 4. Remove any characters that are NOT digits, decimal point, or negative sign
-         $cleaned = preg_replace('/[^\d.-]/', '', $cleaned);
-
-         // 5. Validate the resulting string as a float.
-         // filter_var with FILTER_VALIDATE_FLOAT is good, but can return the float value directly.
-         // We want the string representation after cleaning.
-         // is_numeric handles float/int representations correctly.
-         if (is_numeric($cleaned)) {
-             // Handle edge cases like "-" or "." only, which is_numeric considers true but are invalid numbers.
-             if ($cleaned === '-' || $cleaned === '.' || $cleaned === '+') return ''; // Treat as invalid
-             // Ensure only one decimal point and negative sign at the beginning.
-             if (substr_count($cleaned, '.') > 1 || (strpos($cleaned, '-') > 0 && $cleaned[0] !== '-')) {
-                 self::logWarning("Sanitization resulted in invalid number format after cleaning: " . $numberStr . " -> " . $cleaned);
-                 return '';
-             }
-             return $cleaned;
-         } elseif ($cleaned === '') {
-              return ''; // Input was empty or only contained removed characters
+     private static function logInfo(string $message, array $context = []): void {
+         if (self::$logger) {
+             self::$logger->info($message, $context);
+         } else {
+             error_log("Helper Info (Monolog not ready): " . $message);
          }
-
-         // If we reach here, the cleaned string is not numeric.
-         self::logWarning("Input not numeric after sanitization: " . $numberStr . " -> " . $cleaned);
-         return ''; // Invalid input
      }
 
-       
-     /**
-      * Translates gold product type codes to human-readable Persian.
-      * Logic from translate_product_type in functions.php.
-      *
-      * @param string|null $type Product type code.
-      * @return string Persian translation or formatted code.
-      */
-     public static function translateProductType(?string $type): string {
+    public static function translateProductType(?string $type): string {
         if ($type === null || trim($type) === '') return '-';
         $types = [
             'melted'                 => 'آبشده',
@@ -243,15 +250,7 @@ class Helper {
         return $types[$type] ?? ucfirst(str_replace('_', ' ', $type));
      }
 
-
-     /**
-      * Translates contact type codes to human-readable Persian.
-      * Logic from get_contact_type_farsi in functions.php.
-      *
-      * @param string|null $type Contact type code.
-      * @return string Persian translation or formatted code.
-      */
-     public static function getContactTypeFarsi(?string $type): string {
+    public static function getContactTypeFarsi(?string $type): string {
         if ($type === null || trim($type) === '') return Helper::getMessageText('unknown', '-'); // Use getMessageText
         $types = [
             'debtor'           => 'مشتری',
@@ -261,313 +260,60 @@ class Helper {
             'other'            => 'متفرقه'
         ];
         return $types[$type] ?? ucfirst(str_replace('_', ' ', $type));
-     }
-
-    /**
-     * **WARNING: N+1 Query Potential.**
-     * Calculates the Rials balance for a specific contact using multiple queries.
-     * Should be moved to a dedicated Repository (e.g., ContactRepository or LedgerRepository).
-     * Only use for single contact detail views, NOT for lists.
-     * Logic from calculate_contact_balance in functions.php.
-     *
-     * @param PDO $db PDO connection (needs to be passed as it's not a class dependency).
-     * @param int $contactId Contact ID.
-     * @return float Balance (positive: contact owes us / negative: we owe contact). Returns 0.0 on error.
-     */
-    public static function calculateContactBalance(?PDO $db, int $contactId): float {
-        if (!$db) {
-            self::logError("Cannot calculate contact balance: Database connection not provided.", ['contact_id' => $contactId]);
-            return 0.0; // Return 0 or throw Exception? Returning 0 for now.
-        }
-        $balance = 0.0;
-        try {
-            // + Sales to contact
-            $sql_sell = "SELECT SUM(total_value_rials) FROM transactions WHERE counterparty_contact_id = :id AND transaction_type = 'sell'";
-            $stmt_sell = $db->prepare($sql_sell); $stmt_sell->bindValue(':id', $contactId, PDO::PARAM_INT); $stmt_sell->execute();
-            $balance += (float)($stmt_sell->fetchColumn() ?: 0.0);
-
-            // - Buys from contact
-            $sql_buy = "SELECT SUM(total_value_rials) FROM transactions WHERE counterparty_contact_id = :id AND transaction_type = 'buy'";
-            $stmt_buy = $db->prepare($sql_buy); $stmt_buy->bindValue(':id', $contactId, PDO::PARAM_INT); $stmt_buy->execute();
-            $balance -= (float)($stmt_buy->fetchColumn() ?: 0.0);
-
-            // + Payments We made to contact
-            $sql_paid_to = "SELECT SUM(amount_rials) FROM payments WHERE receiving_contact_id = :id";
-            $stmt_paid_to = $db->prepare($sql_paid_to); $stmt_paid_to->bindValue(':id', $contactId, PDO::PARAM_INT); $stmt_paid_to->execute();
-            $balance += (float)($stmt_paid_to->fetchColumn() ?: 0.0);
-
-            // - Payments He made to us
-            $sql_paid_by = "SELECT SUM(amount_rials) FROM payments WHERE paying_contact_id = :id";
-            $stmt_paid_by = $db->prepare($sql_paid_by); $stmt_paid_by->bindValue(':id', $contactId, PDO::PARAM_INT); $stmt_paid_by->execute();
-            $balance -= (float)($stmt_paid_by->fetchColumn() ?: 0.0);
-
-        } catch (PDOException $e) {
-             self::logError("Database error calculating balance for contact ID {$contactId}: " . $e->getMessage(), ['exception' => $e]);
-             return 0.0; // Return 0 on DB error
-        } catch (Throwable $e) { // Catch any other errors
-             self::logError("Unexpected error calculating balance for contact ID {$contactId}: " . $e->getMessage(), ['exception' => $e]);
-             return 0.0;
-        }
-        return round($balance, 2);
-    }
-
-    /**
-     * Converts a number to its Persian word representation.
-     * Logic from convertNumberToWords in functions.php.
-     *
-     * @param int $number The number to convert.
-     * @return string The word representation.
-     */
-    public static function convertNumberToWords(int $number): string {
-       $words = [
-           0 => 'صفر', 1 => 'یک', 2 => 'دو', 3 => 'سه', 4 => 'چهار', 5 => 'پنج', 6 => 'شش', 7 => 'هفت', 8 => 'هشت', 9 => 'نه',
-           10 => 'ده', 11 => 'یازده', 12 => 'دوازده', 13 => 'سیزده', 14 => 'چهارده', 15 => 'پانزده', 16 => 'شانزده', 17 => 'هفده', 18 => 'هجده', 19 => 'نوزده',
-           20 => 'بیست', 30 => 'سی', 40 => 'چهل', 50 => 'پنجاه', 60 => 'شصت', 70 => 'هفتاد', 80 => 'هشتاد', 90 => 'نود',
-           100 => 'صد', 200 => 'دویست', 300 => 'سیصد', 400 => 'چهارصد', 500 => 'پانصد', 600 => 'ششصد', 700 => 'هفتصد', 800 => 'هشتصد', 900 => 'نهصد'
-       ];
-       if ($number < 0) return 'منفی ' . self::convertNumberToWords(-$number);
-       if ($number < 20) return $words[$number];
-         if ($number < 100) {
-             $tens = floor($number / 10) * 10;
-             $units = $number % 10;
-             return $words[$tens] . ($units ? ' و ' . $words[$units] : '');
-         }
-         if ($number < 1000) {
-             $hundreds = floor($number / 100) * 100;
-             $remainder = $number % 100;
-           return $words[$hundreds] . ($remainder ? ' و ' . self::convertNumberToWords($remainder) : '');
-         }
-         if ($number < 1000000) {
-             $thousands = floor($number / 1000);
-             $remainder = $number % 1000;
-           return self::convertNumberToWords($thousands) . ' هزار' . ($remainder ? ' و ' . self::convertNumberToWords($remainder) : '');
-         }
-         if ($number < 1000000000) {
-             $millions = floor($number / 1000000);
-             $remainder = $number % 1000000;
-           return self::convertNumberToWords($millions) . ' میلیون' . ($remainder ? ' و ' . self::convertNumberToWords($remainder) : '');
-         }
-         if ($number < 1000000000000) {
-             $billions = floor($number / 1000000000);
-             $remainder = $number % 1000000000;
-           return self::convertNumberToWords($billions) . ' میلیارد' . ($remainder ? ' و ' . self::convertNumberToWords($remainder) : '');
-         }
-         return 'عدد بزرگتر از ۱۰۰۰ میلیارد است';
-    }
-
-     /**
-      * Translates delivery status codes to human-readable Persian.
-      * Logic from translate_delivery_status in functions.php.
-      *
-      * @param string|null $status Delivery status code.
-      * @return string Persian translation or formatted code.
-      */
-     public static function translateDeliveryStatus(?string $status): string {
-         if ($status === null || trim($status) === '') return '-';
-         $statuses = [
-             'completed'         => 'تکمیل شده',
-             'pending_delivery'  => 'منتظر تحویل',
-             'pending_receipt'   => 'منتظر دریافت',
-            'cancelled'         => 'لغو شده'
-         ];
-         return $statuses[$status] ?? ucfirst(str_replace('_', ' ', $status)); // Fallback
-     }
-
-     // --- Helpers for PHP < 8.0 ---
-     // این توابع در PHP 8.1 و بالاتر داخلی هستند و نیازی به Polyfill ندارند
-     // اما برای سازگاری با نسخه های کمی پایین تر PHP 8 می توان نگه داشت
-     // بهتر است فقط برای PHP 8.0 و پایین تر Polyfill کنید.
-     // با توجه به اینکه از 8.3 استفاده می کنید، نیازی به اینها نیست.
-     /*
-     public static function strStartsWith(string $haystack, string $needle): bool {
-         return $needle !== '' && strncmp($haystack, $needle, strlen($needle)) === 0;
-     }
-     public static function strEndsWith(string $haystack, string $needle): bool {
-          return $needle !== '' && substr($haystack, -strlen($needle)) === $needle;
-     }
-     */
-
-     // --- توابع لاگینگ داخلی برای استفاده در خود کلاس Helper ---
-     // اینها برای لاگ کردن خطاهای مربوط به توابع کمکی (مثل خطای تبدیل تاریخ یا فرمت عدد) استفاده می شوند.
-     private static function logError(string $message, array $context = []): void {
-         if (self::$logger) {
-             self::$logger->error($message, $context);
-         } else {
-             error_log("Helper Error (Monolog not ready): " . $message);
-         }
-     }
-
-      private static function logWarning(string $message, array $context = []): void {
-          if (self::$logger) {
-              self::$logger->warning($message, $context);
-          } else {
-              error_log("Helper Warning (Monolog not ready): " . $message);
-          }
-      }
-
-       private static function logInfo(string $message, array $context = []): void {
-           if (self::$logger) {
-               self::$logger->info($message, $context);
-           } else {
-               error_log("Helper Info (Monolog not ready): " . $message);
-           }
-       }
-
-    // نکته: تابع check_permission() شامل منطق دسترسی بر اساس نقش کاربر است که بهتر است
-    // به یک کلاس SecurityService یا AuthService اختصاصی منتقل شود.
-    // تابع get_active_license() نیز تعامل مستقیم با دیتابیس دارد و باید به LicenseRepository منتقل شود.
-    // تابع BASE_PATH() تکراری با ثابت ROOT_PATH در public/index.php است و باید حذف شود.
-    // تابع load_view() تکراری با ViewRenderer است و باید حذف شود.
-
-   /**
-    * تولید داده‌های صفحه‌بندی برای نمایش در لیست‌ها
-    * @param int $currentPage صفحه فعلی
-    * @param int $totalPages تعداد کل صفحات
-    * @param int $totalRecords تعداد کل رکوردها
-    * @param int $itemsPerPage تعداد آیتم در هر صفحه
-    * @return array
-    */
-   public static function generatePaginationData(int $currentPage, int $totalPages, int $totalRecords, int $itemsPerPage): array {
-       return [
-           'current_page' => $currentPage,
-           'total_pages' => $totalPages,
-           'total_records' => $totalRecords,
-           'items_per_page' => $itemsPerPage,
-           'has_prev' => $currentPage > 1,
-           'has_next' => $currentPage < $totalPages,
-           'prev_page' => ($currentPage > 1) ? $currentPage - 1 : null,
-           'next_page' => ($currentPage < $totalPages) ? $currentPage + 1 : null,
-       ];
-   }
-
-   /**
-    * بازگرداندن وضعیت‌های مجاز تحویل برای فیلتر لیست معاملات
-    * @return array
-    */
-   public static function getDeliveryStatusOptions(): array {
-       return [
-           'pending_receipt' => 'در انتظار دریافت',
-           'pending_delivery' => 'در انتظار تحویل',
-           'completed' => 'تکمیل شده',
-           'cancelled' => 'لغو شده',
-       ];
-   }
-
-   /**
-    * بازگرداندن کلاس CSS مناسب برای وضعیت تحویل معامله
-    * @param string|null $status
-    * @return string
-    */
-   public static function getDeliveryStatusClass(?string $status): string {
-       return match ($status) {
-           'pending_receipt'  => 'badge bg-warning',
-           'pending_delivery' => 'badge bg-info',
-           'completed'        => 'badge bg-success',
-           'cancelled'        => 'badge bg-danger',
-           default            => 'badge bg-secondary',
-       };
-   }
-
-   /**
-    * ترجمه وضعیت لایسنس به فارسی
-    * @param string|null $status
-    * @return string
-    */
-   public static function translateLicenseStatus(?string $status): string
-   {
-       $map = [
-           'active'   => 'فعال',
-           'expired'  => 'منقضی',
-           'pending'  => 'در انتظار',
-           'revoked'  => 'لغو شده',
-           'unknown'  => 'نامشخص',
-       ];
-       $status = strtolower((string)$status);
-       return $map[$status] ?? 'نامشخص';
-   }
-
-   /**
-    * بازگرداندن کلاس CSS مناسب برای وضعیت لایسنس
-    * @param string|null $status
-    * @return string
-    */
-   public static function getLicenseStatusClass(?string $status): string
-   {
-       $map = [
-           'active'   => 'success',
-           'expired'  => 'danger',
-           'pending'  => 'warning',
-           'revoked'  => 'secondary',
-           'unknown'  => 'secondary',
-       ];
-       $status = strtolower((string)$status);
-       return $map[$status] ?? 'secondary';
-   }
-
-   /**
-    * تولید توکن CSRF جدید
-     * 
-     * @return string توکن تولید شده
-     */
-    public static function generateCsrfToken(): string {
-        return CSRFProtector::generateToken();
     }
     
-    /**
-     * بررسی معتبر بودن توکن CSRF
-     * 
-     * @param string|null $token توکن دریافتی از کاربر
-     * @return bool آیا توکن معتبر است
-     */
-    public static function verifyCsrfToken(?string $token): bool {
-        if ($token === null) {
-            return false;
-        }
-        return CSRFProtector::validateToken($token);
+    public static function translateLicenseStatus(?string $status): string
+    {
+        $map = [
+            'active'   => 'فعال',
+            'expired'  => 'منقضی',
+            'pending'  => 'در انتظار',
+            'revoked'  => 'لغو شده',
+            'unknown'  => 'نامشخص',
+        ];
+        $status = strtolower((string)$status);
+        return $map[$status] ?? 'نامشخص';
     }
+ 
     
-    /**
-     * تولید مجدد توکن CSRF
-     * 
-     * @return string توکن جدید
-     */
-    public static function regenerateCsrfToken(): string {
-        CSRFProtector::removeToken();
-        return CSRFProtector::generateToken();
+    public static function getLicenseStatusClass(string $status): string {
+        return match ($status) {
+            'active' => 'success',
+            'expired', 'revoked' => 'danger',
+            'suspended' => 'warning',
+            default => 'secondary',
+        };
     }
 
-    /**
-     * Retrieves message text by key from the loaded messages array.
-     *
-     * @param string $key The message key.
-     * @param string|null $default Default value if key not found.
-     * @return string The message text or default value.
-     */
-    public static function getMessageText(string $key, ?string $default = null): string {
-        // Check if messages array is loaded and key exists
-        if (self::$messages !== null && array_key_exists($key, self::$messages)) {
-            return self::$messages[$key];
-        }
-
-        // Log warning if message key is not found
-        self::logWarning('Message key not found.', ['key' => $key]);
-
-        // Return key wrapped in ## if debug is on, otherwise return default or key
-        if ((self::$config['app']['debug'] ?? false) && $default === null) {
-            return "##{$key}##";
-        }
-
-        return $default ?? $key; // Return default or the key itself as fallback
+    public static function translateDeliveryStatus(?string $status): string {
+        if ($status === null || trim($status) === '') return '-';
+        $statuses = [
+            'completed'         => 'تکمیل شده',
+            'pending_delivery'  => 'منتظر تحویل',
+            'pending_receipt'   => 'منتظر دریافت',
+           'cancelled'         => 'لغو شده'
+        ];
+        return $statuses[$status] ?? ucfirst(str_replace('_', ' ', $status)); // Fallback
     }
 
-    /**
-     * Recursively sanitize all numeric fields in an array (form data).
-     * Only fields with keys matching numeric field patterns will be sanitized.
-     *
-     * @param array $data Input array (e.g. $_POST)
-     * @param array|null $numericKeys Optional: list of numeric field names (if null, auto-detect by key name)
-     * @return array Sanitized array
-     */
+    public static function getDeliveryStatusClass(string $status): string {
+        return match ($status) {
+            'completed' => 'bg-success',
+            'pending_receipt' => 'bg-info text-dark',
+            'pending_delivery' => 'bg-warning text-dark',
+            'cancelled' => 'bg-danger',
+            default => 'bg-secondary',
+        };
+    }
+    public static function getDeliveryStatusOptions(): array {
+        return [
+            'pending_receipt' => 'در انتظار دریافت',
+            'pending_delivery' => 'در انتظار تحویل',
+            'completed' => 'تکمیل شده',
+            'cancelled' => 'لغو شده',
+        ];
+    }
+
     public static function sanitizeNumbersRecursive(array $data, ?array $numericKeys = null): array
     {
         $result = [];
@@ -593,27 +339,90 @@ class Helper {
         return $result;
     }
 
-    /**
-     * فرمت مبلغ ریالی با جداکننده هزارگان و پسوند ریال
-     * @param float|int|string $amount
-     * @param bool $withSuffix
-     * @return string
-     */
-    public static function formatRial($amount, $withSuffix = true)
-    {
+    public static function convertNumberToWords(int $number): string {
+        $words = [
+            0 => 'صفر', 1 => 'یک', 2 => 'دو', 3 => 'سه', 4 => 'چهار', 5 => 'پنج', 6 => 'شش', 7 => 'هفت', 8 => 'هشت', 9 => 'نه',
+            10 => 'ده', 11 => 'یازده', 12 => 'دوازده', 13 => 'سیزده', 14 => 'چهارده', 15 => 'پانزده', 16 => 'شانزده', 17 => 'هفده', 18 => 'هجده', 19 => 'نوزده',
+            20 => 'بیست', 30 => 'سی', 40 => 'چهل', 50 => 'پنجاه', 60 => 'شصت', 70 => 'هفتاد', 80 => 'هشتاد', 90 => 'نود',
+            100 => 'صد', 200 => 'دویست', 300 => 'سیصد', 400 => 'چهارصد', 500 => 'پانصد', 600 => 'ششصد', 700 => 'هفتصد', 800 => 'هشتصد', 900 => 'نهصد'
+        ];
+        if ($number < 0) return 'منفی ' . self::convertNumberToWords(-$number);
+        if ($number < 20) return $words[$number];
+          if ($number < 100) {
+              $tens = floor($number / 10) * 10;
+              $units = $number % 10;
+              return $words[$tens] . ($units ? ' و ' . $words[$units] : '');
+          }
+          if ($number < 1000) {
+              $hundreds = floor($number / 100) * 100;
+              $remainder = $number % 100;
+            return $words[$hundreds] . ($remainder ? ' و ' . self::convertNumberToWords($remainder) : '');
+          }
+          if ($number < 1000000) {
+              $thousands = floor($number / 1000);
+              $remainder = $number % 1000;
+            return self::convertNumberToWords($thousands) . ' هزار' . ($remainder ? ' و ' . self::convertNumberToWords($remainder) : '');
+          }
+          if ($number < 1000000000) {
+              $millions = floor($number / 1000000);
+              $remainder = $number % 1000000;
+            return self::convertNumberToWords($millions) . ' میلیون' . ($remainder ? ' و ' . self::convertNumberToWords($remainder) : '');
+          }
+          if ($number < 1000000000000) {
+              $billions = floor($number / 1000000000);
+              $remainder = $number % 1000000000;
+            return self::convertNumberToWords($billions) . ' میلیارد' . ($remainder ? ' و ' . self::convertNumberToWords($remainder) : '');
+          }
+          return 'عدد بزرگتر از ۱۰۰۰ میلیارد است';
+     }
+    
+     public static function sanitizeFormattedNumber(?string $numberStr): ?string {
+        if ($numberStr === null) return null;
+
+        // 1. Trim whitespace
+        $cleaned = trim($numberStr);
+
+        // 2. Remove commas (thousands separators)
+        $cleaned = str_replace(',', '', $cleaned);
+
+        // 3. Convert Persian/Arabic digits and decimal separators to English
+        $cleaned = strtr($cleaned, [
+            '۰'=>'0','۱'=>'1','۲'=>'2','۳'=>'3','۴'=>'4',
+            '۵'=>'5','۶'=>'6','۷'=>'7','۸'=>'8','۹'=>'9',
+            '٫'=>'.','،'=>'.' // Persian and Arabic decimal/thousands separators
+        ]);
+
+        // 4. Remove any characters that are NOT digits, decimal point, or negative sign
+        $cleaned = preg_replace('/[^\d.-]/', '', $cleaned);
+
+        // 5. Validate the resulting string as a float.
+        // filter_var with FILTER_VALIDATE_FLOAT is good, but can return the float value directly.
+        // We want the string representation after cleaning.
+        // is_numeric handles float/int representations correctly.
+        if (is_numeric($cleaned)) {
+            // Handle edge cases like "-" or "." only, which is_numeric considers true but are invalid numbers.
+            if ($cleaned === '-' || $cleaned === '.' || $cleaned === '+') return ''; // Treat as invalid
+            // Ensure only one decimal point and negative sign at the beginning.
+            if (substr_count($cleaned, '.') > 1 || (strpos($cleaned, '-') > 0 && $cleaned[0] !== '-')) {
+                self::logWarning("Sanitization resulted in invalid number format after cleaning: " . $numberStr . " -> " . $cleaned);
+                return '';
+            }
+            return $cleaned;
+        } elseif ($cleaned === '') {
+             return ''; // Input was empty or only contained removed characters
+        }
+
+        // If we reach here, the cleaned string is not numeric.
+        self::logWarning("Input not numeric after sanitization: " . $numberStr . " -> " . $cleaned);
+        return ''; // Invalid input
+    }
+
+    
+    public static function formatRial($amount, bool $withSuffix = true): string {
         $formatted = number_format((float)$amount, 0, '.', ',');
         return $withSuffix ? $formatted . ' ریال' : $formatted;
     }
-
-    /**
-     * فرمت کردن اعداد با تعداد رقم اعشار مشخص
-     *
-     * @param mixed $number عدد ورودی
-     * @param int $decimals تعداد ارقام اعشار
-     * @param string $decPoint نماد اعشار
-     * @param string $thousandsSep نماد جداکننده هزارگان
-     * @return string عدد فرمت شده
-     */
+    
     public static function formatNumber($number, int $decimals = 0, string $decPoint = '.', string $thousandsSep = ','): string
     {
         if ($number === null) {
@@ -624,5 +433,56 @@ class Helper {
         $number = (float) $number;
         
         return number_format($number, $decimals, $decPoint, $thousandsSep);
+    }
+    
+    public static function generatePaginationData(int $currentPage, int $totalPages, int $totalRecords, int $itemsPerPage, int $linksToShow = 5): array {
+        $pagination = [
+            'currentPage' => $currentPage,
+            'totalPages' => $totalPages,
+            'totalRecords' => $totalRecords,
+            'itemsPerPage' => $itemsPerPage,
+            'hasNextPage' => $currentPage < $totalPages,
+            'hasPrevPage' => $currentPage > 1,
+            'nextPage' => $currentPage + 1,
+            'prevPage' => $currentPage - 1,
+            'pages' => [],
+            'firstItem' => ($totalRecords > 0) ? (($currentPage - 1) * $itemsPerPage) + 1 : 0,
+            'lastItem' => ($totalRecords > 0) ? min($currentPage * $itemsPerPage, $totalRecords) : 0,
+        ];
+
+        if ($totalPages <= 1) {
+            return $pagination;
+        }
+
+        $start = max(1, $currentPage - (int)floor(($linksToShow - 1) / 2));
+        $end = min($totalPages, $currentPage + (int)ceil(($linksToShow - 1) / 2));
+
+        if ($end - $start + 1 < $linksToShow) {
+            if ($start === 1) {
+                $end = min($totalPages, $start + $linksToShow - 1);
+            } elseif ($end === $totalPages) {
+                $start = max(1, $end - $linksToShow + 1);
+            }
+        }
+
+        if ($start > 1) {
+            $pagination['pages'][] = ['num' => 1, 'isCurrent' => false, 'isEllipsis' => false];
+            if ($start > 2) {
+                $pagination['pages'][] = ['num' => '...', 'isCurrent' => false, 'isEllipsis' => true];
+            }
+        }
+
+        for ($i = $start; $i <= $end; $i++) {
+            $pagination['pages'][] = ['num' => $i, 'isCurrent' => $i === $currentPage, 'isEllipsis' => false];
+        }
+
+        if ($end < $totalPages) {
+            if ($end < $totalPages - 1) {
+                $pagination['pages'][] = ['num' => '...', 'isCurrent' => false, 'isEllipsis' => true];
+            }
+            $pagination['pages'][] = ['num' => $totalPages, 'isCurrent' => false, 'isEllipsis' => false];
+        }
+
+        return $pagination;
     }
 }

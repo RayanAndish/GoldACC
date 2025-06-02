@@ -6,8 +6,10 @@ use PDO;
 use Monolog\Logger;
 use Throwable;
 use Exception;
-use Illuminate\Http\Request;
-use Illuminate\Validation\ValidationException;
+
+// FIX: حذف کامل وابستگی‌های غیرضروری و اشتباه لاراول
+// use Illuminate\Http\Request;
+// use Illuminate\Validation\ValidationException;
 
 // Core & Base
 use App\Core\ViewRenderer;
@@ -16,17 +18,15 @@ use App\Controllers\AbstractController;
 // Dependencies
 use App\Services\LicenseService;
 use App\Services\SecurityService;
-use App\Utils\Helper;
 use App\Services\ApiClient;
+use App\Utils\Helper;
 
 class LicenseController extends AbstractController {
-
-    // LicenseService از طریق سازنده AbstractController و آرایه $services در دسترس است: $this->licenseService
-
+    
+    // FIX: حذف پراپرتی‌های تکراری چون از AbstractController به ارث می‌رسند.
+    // تمام وابستگی‌ها از طریق $this->services در دسترس هستند.
     private SecurityService $securityService;
-    protected Logger $logger;
-    protected LicenseService $licenseService;
-    protected ApiClient $apiClient;
+    private ApiClient $apiClient;
 
     public function __construct(
         PDO $db,
@@ -37,32 +37,27 @@ class LicenseController extends AbstractController {
     ) {
         parent::__construct($db, $logger, $config, $viewRenderer, $services);
         
-        // اطمینان از وجود سرویس‌های مورد نیاز
+        // FIX: دریافت وابستگی‌ها از کانتینر سرویس‌ها
         if (!isset($this->services['securityService']) || !$this->services['securityService'] instanceof SecurityService) {
-            throw new Exception('SecurityService not found in services array for LicenseController.');
-        }
-        if (!isset($this->services['licenseService']) || !$this->services['licenseService'] instanceof LicenseService) {
-            throw new Exception('LicenseService not found in services array for LicenseController.');
+            throw new Exception('SecurityService not found for LicenseController.');
         }
         if (!isset($this->services['apiClient']) || !$this->services['apiClient'] instanceof ApiClient) {
-            throw new Exception('ApiClient not found in services array for LicenseController.');
+            throw new Exception('ApiClient not found for LicenseController.');
         }
-
         $this->securityService = $this->services['securityService'];
-        $this->licenseService = $this->services['licenseService'];
+        // $this->licenseService از AbstractController در دسترس است.
         $this->apiClient = $this->services['apiClient'];
         
-        $this->logger->debug("LicenseController initialized.");
+        $this->logger->debug("LicenseController initialized correctly.");
     }
 
     public function showActivateForm(): void {
         // بررسی وضعیت لایسنس
         $licenseStatus = $this->licenseService->checkLicense();
         if ($licenseStatus['valid']) {
-            // اگر لایسنس معتبر است، به صفحه اصلی هدایت می‌کنیم
-            $this->redirect('app/dashboard');
+            $this->redirect('/app/dashboard');
             return;
-        }
+    }
 
         try {
             // بررسی زمان ایجاد کد درخواست قبلی

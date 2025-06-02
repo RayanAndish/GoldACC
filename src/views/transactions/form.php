@@ -1,317 +1,519 @@
 <?php
-$messages_from_php_if_any = $messages_from_php_if_any ?? [];
-$fieldsFromView = $viewData['fields'] ?? [];
-$formulas = $viewData['formulas'] ?? [];
-$products_list = $viewData['products_list'] ?? []; // این باید آرایه‌ای از آبجکت‌های Product باشد
-$contacts = $viewData['contacts'] ?? [];   // این باید آرایه‌ای از آبجکت‌های Contact باشد
-$baseUrl = rtrim($viewData['baseUrl'] ?? '', '/');
+/**
+ * Template: src/views/transactions/form.php
+ * فرم برای ایجاد یا ویرایش یک معامله.
+ * این فایل تمامی فیلدهای داینامیک اقلام معامله را در سمت PHP رندر می‌کند.
+ */
+
+use App\Utils\Helper;
+use Morilog\Jalali\Jalalian; // اضافه شدن برای فرمت دهی تاریخ شمسی
+
+// --- استخراج داده‌ها از $viewData ---
 $pageTitle = $viewData['page_title'] ?? 'فرم معامله';
-$errorMessage = $viewData['error_message'] ?? null;
-$loadingError = $viewData['loading_error'] ?? null;
-$csrfToken = $viewData['csrf_token'] ?? ''; // CSRF token for security
+$isEditMode = $viewData['is_edit_mode'] ?? false;
+$formAction = $viewData['form_action'] ?? '';
+$csrfToken = $viewData['csrf_token'] ?? ''; // CSRF Token از کنترلر می‌آید
+$baseUrl = $viewData['baseUrl'] ?? '';
+$contactsData = $viewData['contactsData'] ?? [];
+$assayOfficesData = $viewData['assayOfficesData'] ?? [];
+$productsData = $viewData['productsData'] ?? []; // Product objects
+$fieldsData = $viewData['fieldsData'] ?? []; // داده‌های فیلدهای داینامیک
+$formulasData = $viewData['formulasData'] ?? []; // داده‌های فرمول‌های داینامیک
+$transactionData = $viewData['transactionData'] ?? null;
+$transactionItemsData = $viewData['transactionItemsData'] ?? [];
+$defaultSettings = $viewData['default_settings'] ?? [];
+$config = $viewData['config'] ?? []; // برای دسترسی به app.debug
 
-// گروه‌بندی فیلدها برای transaction
-$fieldGroups = [
-    'main' => [1, 2, 3, 4, 201], 
-    'item_row' => [5],      // items[{index}][product_id]
-    'notes' => [6],         // notes
-];
+// --- توابع کمکی PHP برای رندرینگ فیلدها ---
+// این توابع به دلیل پیچیدگی رندر فیلدهای داینامیک در PHP در اینجا تعریف می‌شوند.
+// این توابع مشابه منطق FieldManager در JS هستند.
 
-// تابع کمکی برای پیدا کردن فیلد با ID
-function findFieldById(array $fieldsArray, int $id): ?array {
-    foreach ($fieldsArray as $field) {
-        if (isset($field['id']) && $field['id'] === $id) {
-            return $field;
-        }
-    }
-    return null;
+/**
+ * فیلدهای fields.json را بر اساس گروه فیلتر می‌کند.
+ * @param array $allFields
+ * @param string $group
+ * @return array
+ */
+function getFieldsByGroup(array $allFields, string $group): array {
+    if (empty($group)) return [];
+    $groupLower = strtolower($group);
+    return array_filter($allFields, function($field) use ($groupLower) {
+        return isset($field['group']) && strtolower($field['group']) === $groupLower;
+    });
 }
 
-// داده‌های احتمالی برای حالت ویرایش (فعلا خالی در نظر گرفته می‌شود برای فرم افزودن)
-$transactionData = $viewData['transaction'] ?? []; // می‌تواند آبجکت یا آرایه باشد
-$transactionItemsData = $viewData['transaction_items'] ?? [];
+/**
+ * HTML یک فیلد داینامیک را تولید می‌کند.
+ * @param array $field - تعریف فیلد از fields.json
+ * @param int $index - شاخص ردیف آیتم
+ * @param mixed $fieldValue - مقدار فعلی فیلد
+ * @param array $assayOffices - لیست مراکز ری‌گیری (برای select)
+ * @return string HTML فیلد
+ */
+function renderDynamicFieldHtml(array $field, int $index, $fieldValue, array $assayOffices): string {
+    $fieldName = $field['name'] ?? '';
+    $fieldLabel = $field['label'] ?? '';
+    $fieldType = $field['type'] ?? 'text';
+    $isRequired = $field['required'] ?? false;
+    $colClass = $field['col_class'] ?? 'col-md-2';
+    $isReadonly = $field['readonly'] ?? false;
+    $step = $field['step'] ?? null;
+    $min = $field['min'] ?? null;
+    $max = $field['max'] ?? null;
 
-?>
-<div class="container mt-4">
-    <h1><?= htmlspecialchars($pageTitle, ENT_QUOTES, 'UTF-8') ?></h1>
-    
-    <!-- نمایش پیام خطا -->
-    <?php if ($errorMessage): ?>
-        <div class="alert alert-danger">
-            <?php 
-            if (is_array($errorMessage) && isset($errorMessage['text'])) {
-                echo $errorMessage['text'];
-            } else {
-                echo $errorMessage;
-            }
-            ?>
-        </div>
-    <?php endif; ?>
-    
-    <?php if ($loadingError): ?>
-        <div class="alert alert-warning"><?= $loadingError ?></div>
-    <?php endif; ?>
-    
-    <?php if (isset($viewData['success_message']) && !empty($viewData['success_message'])): ?>
-        <div class="alert alert-success">
-            <?php 
-            if (is_array($viewData['success_message']) && isset($viewData['success_message']['text'])) {
-                echo $viewData['success_message']['text'];
-            } else {
-                echo $viewData['success_message'];
-            }
-            ?>
-        </div>
-    <?php endif; ?>
-<form id="transaction-form" class="p-4 needs-validation" action="<?= htmlspecialchars($viewData['form_action'] ?? '', ENT_QUOTES, 'UTF-8') ?>" method="POST" novalidate>
-  <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken, ENT_QUOTES, 'UTF-8') ?>">
-  <!-- فیلدهای بالای فرم -->
-  <div class="row mb-3">
-  <?php
-  foreach ($fieldGroups['main'] as $fid):
-    $f = findFieldById($fieldsFromView, $fid);
-    if ($f):
-      $fieldName = $f['name'] ?? 'unknown_field_' . $fid;
-      $fieldLabel = $f['label'] ?? 'فیلد ناشناس';
-      $fieldType = $f['type'] ?? 'text';
-      $fieldValue = $transactionData[$fieldName] ?? '';
-      // $colClass = $f['col_class'] ?? 'col-md-3'; // این خط را حذف کن
-  ?>
-      <div class="col-md-2">
-        <label for="<?= htmlspecialchars($fieldName, ENT_QUOTES, 'UTF-8') ?>" class="form-label"><?= htmlspecialchars($fieldLabel, ENT_QUOTES, 'UTF-8') ?><?= $fieldType !== 'textarea' ? ' <span class="text-danger">*</span>' : '' ?></label>
-        <?php if ($fieldType === 'select' && $fieldName === 'counterparty_contact_id'): ?>
-          <select id="<?= htmlspecialchars($fieldName, ENT_QUOTES, 'UTF-8') ?>" name="<?= htmlspecialchars($fieldName, ENT_QUOTES, 'UTF-8') ?>" class="form-select" required>
-            <option value="">انتخاب طرف حساب...</option>
-            <?php if (!empty($contacts)): foreach ($contacts as $contact):
-                $contactId = $contact['id'] ?? null;
-                $contactName = $contact['name'] ?? 'نامشخص';
-                $isSelected = (isset($transactionData['counterparty_contact_id']) && $transactionData['counterparty_contact_id'] == $contactId);?>
-                <option value="<?= htmlspecialchars((string)$contactId, ENT_QUOTES, 'UTF-8') ?>" <?= $isSelected ? 'selected' : '' ?>>
-                    <?= htmlspecialchars($contactName, ENT_QUOTES, 'UTF-8') ?>
-                </option>            
-              <?php endforeach; endif; ?>
-          </select>
-        <?php elseif ($fieldType === 'select' && $fieldName === 'transaction_type'): 
-            $currentTransactionType = $transactionData['transaction_type'] ?? 'buy';
-        ?>
-          <select id="<?= htmlspecialchars($fieldName, ENT_QUOTES, 'UTF-8') ?>" name="<?= htmlspecialchars($fieldName, ENT_QUOTES, 'UTF-8') ?>" class="form-select" required>
-            <option value="buy" <?= ($currentTransactionType === 'buy') ? 'selected' : '' ?>>خرید</option>
-            <option value="sell" <?= ($currentTransactionType === 'sell') ? 'selected' : '' ?>>فروش</option>
-          </select>
-        <?php elseif ($fieldType === 'select' && $fieldName === 'delivery_status'): ?>
-          <select id="<?= htmlspecialchars($fieldName, ENT_QUOTES, 'UTF-8') ?>" name="<?= htmlspecialchars($fieldName, ENT_QUOTES, 'UTF-8') ?>" class="form-select" required>
-            <option value="">انتخاب وضعیت...</option>
-            <?php foreach (($f['options'] ?? []) as $opt): ?>
-              <option value="<?= htmlspecialchars($opt['value'], ENT_QUOTES, 'UTF-8') ?>" <?= ($fieldValue == $opt['value']) ? 'selected' : '' ?>>
-                <?= htmlspecialchars($opt['label'], ENT_QUOTES, 'UTF-8') ?>
-              </option>
-            <?php endforeach; ?>
-          </select>
-        <?php elseif ($fieldName === 'mazaneh_price'): ?>
-          <input 
-            type="<?= htmlspecialchars($fieldType, ENT_QUOTES, 'UTF-8') ?>" 
-            id="<?= htmlspecialchars($fieldName, ENT_QUOTES, 'UTF-8') ?>" 
-            name="<?= htmlspecialchars($fieldName, ENT_QUOTES, 'UTF-8') ?>" 
-            class="form-control autonumeric" 
-            value="<?= htmlspecialchars((string)$fieldValue, ENT_QUOTES, 'UTF-8') ?>"
-            data-autonumeric-options='{"digitGroupSeparator": "٬", "decimalPlaces": 0, "selectOnFocus": false}'
-            required>
-        <?php else: // text, number, date, etc.
-            $inputClass = 'form-control';
-            if ($fieldName === 'transaction_date') $inputClass .= ' jalali-datepicker';
-            if ($f['is_numeric'] ?? false) $inputClass .= ' autonumeric';
-            $dataAutonumeric = '';
-            if ($f['is_numeric'] ?? false) {
-                $dataAutonumeric = 'data-autonumeric-options=\'{\"digitGroupSeparator\": \"٬\"}\'';
-            }
-        ?>
-          <input 
-            type="<?= htmlspecialchars($fieldType, ENT_QUOTES, 'UTF-8') ?>" 
-            id="<?= htmlspecialchars($fieldName, ENT_QUOTES, 'UTF-8') ?>" 
-            name="<?= htmlspecialchars($fieldName, ENT_QUOTES, 'UTF-8') ?>" 
-            class="<?= $inputClass ?>" 
-            value="<?= htmlspecialchars((string)$fieldValue, ENT_QUOTES, 'UTF-8') ?>"
-            <?= $dataAutonumeric ?>
-            required>
-        <?php endif; ?>
-        <div class="invalid-feedback">لطفا <?= htmlspecialchars($fieldLabel, ENT_QUOTES, 'UTF-8') ?> را وارد کنید.</div>
-      </div>
-    <?php endif; endforeach; ?>
-  </div>
+    $html = "<div class=\"{$colClass}\">";
+    $html .= "<label class=\"form-label\">{$fieldLabel}";
+    if ($isRequired) $html .= " <span class=\"text-danger\">*</span>";
+    $html .= "</label>";
 
-  <!-- بخش شرح معامله -->
-  <h5 class="mt-4 mb-3">اقلام معامله <span class="text-danger">*</span></h5>
-  <div id="transaction-items-container" class="mb-3">
-    <?php
-    foreach ($transactionItemsData as $index => $item) {
-        $group = '';
-        if (!empty($item['product_id']) && isset($products_list)) {
-            foreach ($products_list as $p) {
-                if ($p->id == $item['product_id']) {
-                    $group = strtolower($p->category->base_category ?? '');
-                    break;
-                }
-            }
-        }
-        // فیلدهای داینامیک مالیات و ارزش افزوده برای هر گروه
-        $taxField = '';
-        $vatField = '';
-        switch ($group) {
-            case 'melted':
-                $taxField = 'item_general_tax_melted';
-                $vatField = 'item_vat_melted';
-                break;
-            case 'manufactured':
-                $taxField = 'item_general_tax_manufactured';
-                $vatField = 'item_vat_manufactured';
-                break;
-            case 'coin':
-                $taxField = 'item_general_tax_coin';
-                $vatField = 'item_vat_coin';
-                break;
-            case 'goldbullion':
-                $taxField = 'item_general_tax_goldbullion';
-                $vatField = 'item_vat_goldbullion';
-                break;
-            case 'silverbullion':
-                $taxField = 'item_general_tax_silverbullion';
-                $vatField = 'item_vat_silverbullion';
-                break;
-            case 'jewelry':
-                $taxField = 'item_general_tax_jewelry';
-                $vatField = 'item_vat_jewelry';
-                break;
-        }
-        if ($taxField) {
-            echo '<input type="hidden" name="items['.$index.']['.$taxField.']" value="'.htmlspecialchars($item[$taxField] ?? '').'">';
-        }
-        if ($vatField) {
-            echo '<input type="hidden" name="items['.$index.']['.$vatField.']" value="'.htmlspecialchars($item[$vatField] ?? '').'">';
-        }
+    $inputClasses = ['form-control', 'form-control-sm'];
+    if (isset($field['is_numeric']) && $field['is_numeric']) $inputClasses[] = 'autonumeric';
+    if ($isReadonly) $inputClasses[] = 'readonly';
+
+    $attributes = '';
+    if ($isRequired) $attributes .= ' required';
+    if ($isReadonly) $attributes .= ' readonly';
+    if ($step !== null) $attributes .= " step=\"{$step}\"";
+    if ($min !== null) $attributes .= " min=\"{$min}\"";
+    if ($max !== null) $attributes .= " max=\"{$max}\"";
+
+    // برای فیلدهای autonumeric، مقدار را بدون فرمت (فقط عدد) نمایش می‌دهیم
+    if (isset($field['is_numeric']) && $field['is_numeric'] && is_numeric($fieldValue)) {
+        $fieldValue = (float)$fieldValue; // اطمینان از نوع float
     }
-    ?>
-  </div>
-  <div class="d-flex justify-content-between my-3">
-    <button type="button" id="add-transaction-item" class="btn btn-success"> افزودن قلم جدید</button>
-  </div>
+    
+    // مدیریت خاص برای item_has_attachments_manufactured
+    if ($fieldName === 'item_has_attachments_manufactured') {
+        $html .= "<select name=\"items[{$index}][{$fieldName}]\" class=\"form-select " . implode(' ', $inputClasses) . " item-attachments-toggle\"{$attributes}>";
+        $html .= "<option value=\"yes\" " . (($fieldValue === 'yes') ? 'selected' : '') . ">دارد</option>";
+        $html .= "<option value=\"no\" " . (($fieldValue === 'no') ? 'selected' : '') . ">ندارد</option>";
+        $html .= "</select>";
+    } elseif ($fieldType === 'select') {
+        $html .= "<select name=\"items[{$index}][{$fieldName}]\" class=\"form-select " . implode(' ', $inputClasses) . "\"{$attributes}>";
+        $html .= "<option value=\"\">انتخاب کنید...</option>";
+        if (isset($field['options']) && is_array($field['options'])) {
+            foreach ($field['options'] as $option) {
+                $selected = (string)$option['value'] === (string)$fieldValue ? 'selected' : ''; // مقایسه به عنوان رشته
+                $html .= "<option value=\"" . Helper::escapeHtml($option['value']) . "\" {$selected}>" . Helper::escapeHtml($option['label']) . "</option>";
+            }
+        } elseif ($fieldName === 'item_assay_office_melted') { // مورد خاص برای مراکز ری‌گیری
+            foreach ($assayOffices as $office) {
+                $selected = (string)$office['id'] === (string)$fieldValue ? 'selected' : ''; // مقایسه به عنوان رشته
+                $html .= "<option value=\"" . (int)$office['id'] . "\" {$selected}>" . Helper::escapeHtml($office['name']) . "</option>";
+            }
+        }
+        $html .= "</select>";
+    } elseif ($fieldType === 'textarea') {
+        $html .= "<textarea name=\"items[{$index}][{$fieldName}]\" class=\"form-control " . implode(' ', $inputClasses) . "\"{$attributes}>" . Helper::escapeHtml($fieldValue) . "</textarea>";
+    } elseif ($fieldType === 'checkbox') {
+        $checked = (bool)$fieldValue ? 'checked' : '';
+        $html .= "<input type=\"checkbox\" name=\"items[{$index}][{$fieldName}]\" class=\"form-check-input " . implode(' ', $inputClasses) . "\" value=\"1\" {$checked}{$attributes}>";
+    } else { // text, number, etc.
+        $html .= "<input type=\"text\" name=\"items[{$index}][{$fieldName}]\" class=\"form-control " . implode(' ', $inputClasses) . "\" value=\"" . Helper::escapeHtml($fieldValue) . "\"{$attributes}>";
+    }
 
-  <!-- قالب ردیف کالا -->
-  <template id="item-row-template">
-    <div class="transaction-item-row border rounded p-3 mb-3 bg-light position-relative">
-      <!-- ردیف اول: انتخاب کالا با عرض کامل -->
-      <div class="row mb-2">
-        <div class="col-12">
-          <label class="form-label">کالا <span class="text-danger">*</span></label>
-          <select class="form-select product-select" name="items[{index}][product_id]" required>
-            <!-- گزینه‌ها توسط جاوااسکریپت (fillProductSelect) پر خواهند شد -->
-            <option value="">انتخاب کالا...</option>
-          </select>
-          <div class="invalid-feedback">لطفا کالا را انتخاب کنید.</div>
-        </div>
-      </div>
-      <!-- ردیف دوم: فیلدهای اختصاصی کالا با عرض کامل -->
-      <div class="row mb-2">
-        <div class="col-12">
-          <div class="row dynamic-fields-row" id="dynamic-fields-{index}">
-            <!-- Dynamic fields based on product selection will be injected here by JS -->
-          </div>
-        </div>
-      </div>
-      <!-- فیلدهای hidden مالیات و ارزش افزوده برای همه گروه‌ها -->
-      <input type="hidden" name="items[{index}][item_general_tax_melted]" value="">
-      <input type="hidden" name="items[{index}][item_vat_melted]" value="">
-      <input type="hidden" name="items[{index}][item_general_tax_manufactured]" value="">
-      <input type="hidden" name="items[{index}][item_vat_manufactured]" value="">
-      <input type="hidden" name="items[{index}][item_general_tax_coin]" value="">
-      <input type="hidden" name="items[{index}][item_vat_coin]" value="">
-      <input type="hidden" name="items[{index}][item_general_tax_goldbullion]" value="">
-      <input type="hidden" name="items[{index}][item_vat_goldbullion]" value="">
-      <input type="hidden" name="items[{index}][item_general_tax_silverbullion]" value="">
-      <input type="hidden" name="items[{index}][item_vat_silverbullion]" value="">
-      <input type="hidden" name="items[{index}][item_general_tax_jewelry]" value="">
-      <input type="hidden" name="items[{index}][item_vat_jewelry]" value="">
-      <!-- ردیف سوم: دکمه حذف -->
-      <div class="row">
-        <div class="col-12 text-end">
-          <button type="button" class="btn btn-outline-danger btn-sm remove-item-btn ms-2">
-            <i class="bi bi-trash"></i> حذف ردیف
-          </button>
-        </div>
-      </div>
-    </div>
-  </template>
+    $html .= "<div class=\"invalid-feedback\">لطفا {$fieldLabel} را وارد کنید.</div>";
+    $html .= "</div>"; // بستن col div
+    return $html;
+}
 
-  <!-- بخش خلاصه مالی -->
-  <div class="card mt-4">
-    <div class="card-header bg-info text-white">خلاصه مالی</div>
-    <div class="card-body">
-      <div class="row mb-2">
-        <div class="col-md-4">جمع پایه اقلام (ریال): <span id="summary-sum_base_items">۰</span></div>
-        <div class="col-md-4">جمع سود/اجرت/کارمزد (ریال): <span id="summary-sum_profit_wage_fee">۰</span></div>
-        <div class="col-md-4">جمع مالیات عمومی (ریال): <span id="summary-total_general_tax">۰</span></div>
-      </div>
-      <div class="row mb-2">
-        <div class="col-md-4">جمع قبل از ارزش افزوده (ریال): <span id="summary-sum_before_vat">۰</span></div>
-        <div class="col-md-4">مالیات بر ارزش افزوده کل (ریال): <span id="summary-total_vat">۰</span></div>
-        <div class="col-md-4">مبلغ نهایی قابل پرداخت (ریال): <span id="summary-final_payable">۰</span></div>
-      </div>
-    </div>
-  </div>
+// --- تعیین مقادیر پیش‌فرض برای فیلدهای اصلی فرم ---
+$defaultTransactionType = $transactionData['transaction_type'] ?? 'sell'; // پیش‌فرض فروش
+$defaultDeliveryStatus = $transactionData['delivery_status'] ?? 'completed'; // وضعیت پیش‌فرض از دیتابیس یا 'completed'
 
-  <div class="mt-4">
-    <?php 
-      $notesField = findFieldById($fieldsFromView, 6); // Field ID for notes
-      if ($notesField):
-        $notesFieldName = $notesField['name'] ?? 'notes';
-        $notesFieldLabel = $notesField['label'] ?? 'یادداشت‌ها';
-        $notesFieldValue = $transactionData[$notesFieldName] ?? '';
-    ?>
-      <label for="<?= htmlspecialchars($notesFieldName, ENT_QUOTES, 'UTF-8') ?>" class="form-label"><?= htmlspecialchars($notesFieldLabel, ENT_QUOTES, 'UTF-8') ?></label>
-      <textarea id="<?= htmlspecialchars($notesFieldName, ENT_QUOTES, 'UTF-8') ?>" name="<?= htmlspecialchars($notesFieldName, ENT_QUOTES, 'UTF-8') ?>" rows="3" class="form-control"><?= htmlspecialchars($notesFieldValue, ENT_QUOTES, 'UTF-8') ?></textarea>
+// اگر در حالت افزودن هستیم و وضعیت تحویل به صورت دستی تنظیم نشده، آن را بر اساس نوع معامله تنظیم می‌کنیم
+if (!$isEditMode && empty($transactionData['delivery_status'])) {
+    $defaultDeliveryStatus = ($defaultTransactionType === 'buy') ? 'pending_receipt' : 'pending_delivery';
+}
+
+// فرمت دهی تاریخ معامله به شمسی برای نمایش در فیلد ورودی
+$transactionDatePersian = '';
+if (!empty($transactionData['transaction_date'])) {
+    try {
+        $dt = new DateTime($transactionData['transaction_date']);
+        $transactionDatePersian = Jalalian::fromDateTime($dt)->format('Y/m/d H:i:s');
+    } catch (Exception $e) {
+        $transactionDatePersian = ''; // در صورت خطا، مقدار خالی
+    }
+} elseif (!$isEditMode) {
+    $transactionDatePersian = Jalalian::now()->format('Y/m/d H:i:s'); // تاریخ فعلی برای حالت افزودن
+}
+
+// فرمت دهی تاریخ تحویل به شمسی برای نمایش در فیلد ورودی
+$deliveryDatePersian = '';
+if (!empty($transactionData['delivery_date'])) {
+    try {
+        $dt = new DateTime($transactionData['delivery_date']);
+        $deliveryDatePersian = Jalalian::fromDateTime($dt)->format('Y/m/d H:i:s');
+    } catch (Exception $e) {
+        $deliveryDatePersian = ''; // در صورت خطا، مقدار خالی
+    }
+}
+
+// --- نمایش پیام‌های خطا یا موفقیت از کنترلر ---
+?>
+
+<h1 class="mb-4"><?php echo Helper::escapeHtml($pageTitle); ?></h1>
+
+<?php if (isset($viewData['loading_error']) && $viewData['loading_error']): ?>
+    <div class="alert alert-danger"><?php echo Helper::escapeHtml($viewData['loading_error']); ?></div>
+<?php return; endif; ?>
+
+<form id="transaction-form" action="<?php echo Helper::escapeHtml($formAction); ?>" method="POST" novalidate>
+    <input type="hidden" name="csrf_token" value="<?php echo Helper::escapeHtml($csrfToken); ?>">
+    <?php if ($isEditMode && isset($transactionData['id'])): ?>
+        <input type="hidden" name="transaction_id" value="<?php echo (int)$transactionData['id']; ?>">
     <?php endif; ?>
-    <div class="mt-4 text-center">
-        <button type="submit" class="btn btn-primary btn-lg">💾 ثبت معامله</button>
-        <a href="<?= htmlspecialchars($baseUrl, ENT_QUOTES, 'UTF-8') ?>/app/transactions" class="btn btn-secondary btn-lg">انصراف</a>
-    </div>
-  </div>
-</form>
-</div> <!-- End container -->
 
+    <!-- فیلدهای اصلی معامله -->
+    <div class="row g-3">
+        <?php if ($isEditMode): // نمایش شماره معامله فقط در حالت ویرایش ?>
+        <div class="col-md-2">
+            <label class="form-label">شماره معامله</label>
+            <input type="text" class="form-control" value="<?php echo (int)$transactionData['id']; ?>" readonly>
+        </div>
+        <?php endif; ?>
+
+        <div class="col-md-2">
+            <label for="transaction_type" class="form-label">نوع معامله<span class="text-danger">*</span></label>
+            <select id="transaction_type" name="transaction_type" class="form-select" required>
+                <option value="sell" <?php echo ($defaultTransactionType === 'sell') ? 'selected' : ''; ?>>فروش</option>
+                <option value="buy" <?php echo ($defaultTransactionType === 'buy') ? 'selected' : ''; ?>>خرید</option>
+            </select>
+        </div>
+        <div class="col-md-3">
+            <label for="counterparty_contact_id" class="form-label">طرف حساب<span class="text-danger">*</span></label>
+            <select id="counterparty_contact_id" name="counterparty_contact_id" class="form-select" required>
+                <option value="">انتخاب کنید...</option>
+                <?php foreach ($contactsData as $contact): ?>
+                    <option value="<?php echo (int)$contact['id']; ?>" <?php echo (($transactionData['counterparty_contact_id'] ?? '') == $contact['id']) ? 'selected' : ''; ?>>
+                        <?php echo Helper::escapeHtml($contact['name']); ?>
+                    </option>
+                <?php endforeach; ?>
+            </select>
+            <!-- فیلدهای مخفی برای اطلاعات طرف حساب که توسط JS پر می‌شوند -->
+            <input type="hidden" name="party_name" value="<?php echo Helper::escapeHtml($transactionData['party_name'] ?? ''); ?>">
+            <input type="hidden" name="party_phone" value="<?php echo Helper::escapeHtml($transactionData['party_phone'] ?? ''); ?>">
+            <input type="hidden" name="party_national_code" value="<?php echo Helper::escapeHtml($transactionData['party_national_code'] ?? ''); ?>">
+        </div>
+        <div class="col-md-2">
+            <label for="transaction_date" class="form-label">تاریخ معامله<span class="text-danger">*</span></label>
+            <input type="text" id="transaction_date" name="transaction_date" class="form-control jalali-datepicker" value="<?php echo Helper::escapeHtml($transactionDatePersian); ?>" required>
+        </div>
+        <div class="col-md-2">
+            <label for="mazaneh_price" class="form-label">قیمت مظنه</label>
+            <input type="text" id="mazaneh_price" name="mazaneh_price" class="form-control autonumeric" value="<?php echo Helper::escapeHtml(Helper::formatNumber($transactionData['mazaneh_price'] ?? '0', 0, '.', '')); ?>">
+        </div>
+        <div class="col-md-3">
+            <label for="delivery_status" class="form-label">وضعیت تحویل</label>
+            <select id="delivery_status" name="delivery_status" class="form-select">
+                <option value="completed" <?php echo ($defaultDeliveryStatus === 'completed') ? 'selected' : ''; ?>>تکمیل شده</option>
+                <option value="pending_receipt" <?php echo ($defaultDeliveryStatus === 'pending_receipt') ? 'selected' : ''; ?>>منتظر دریافت</option>
+                <option value="pending_delivery" <?php echo ($defaultDeliveryStatus === 'pending_delivery') ? 'selected' : ''; ?>>منتظر تحویل</option>
+                <option value="cancelled" <?php echo ($defaultDeliveryStatus === 'cancelled') ? 'selected' : ''; ?>>لغو شده</option>
+            </select>
+        </div>
+        <div class="col-md-3">
+            <label for="delivery_date" class="form-label">تاریخ تحویل</label>
+            <input type="text" id="delivery_date" name="delivery_date" class="form-control jalali-datepicker" value="<?php echo Helper::escapeHtml($deliveryDatePersian); ?>" <?php echo (!isset($transactionData['delivery_status']) || $transactionData['delivery_status'] == 'completed') ? '' : 'disabled'; ?>>
+        </div>
+    </div>
+
+    <!-- بخش اقلام معامله -->
+    <div class="card shadow-sm mb-4 mt-4">
+        <div class="card-header fw-bold">اقلام معامله</div>
+        <div class="card-body">
+            <div id="transaction-items-container">
+                <?php
+                // اگر در حالت ویرایش هستیم و آیتم‌ها موجودند، آن‌ها را رندر می‌کنیم
+                if ($isEditMode && !empty($transactionItemsData)):
+                    foreach ($transactionItemsData as $index => $item):
+                        // پیدا کردن محصول مربوط به این آیتم
+                        $selectedProduct = null;
+                        foreach ($productsData as $product) {
+                            if ((is_object($product) ? $product->id : $product['id']) == $item['product_id']) {
+                                $selectedProduct = $product;
+                                break;
+                            }
+                        }
+
+                        // تعیین گروه محصول (base_category)
+                        $productGroup = '';
+                        if ($selectedProduct) {
+                            if (is_object($selectedProduct)) {
+                                $productGroup = $selectedProduct->category->base_category ?? '';
+                            } elseif (is_array($selectedProduct)) {
+                                $productGroup = $selectedProduct['product_category_base'] ?? ''; // از JOIN در Repository
+                            }
+                            $productGroup = strtolower($productGroup);
+                        }
+                ?>
+                        <div class="transaction-item-row border rounded p-3 mb-3 bg-light">
+                            <div class="row g-2 align-items-center">
+                                <div class="col-12 col-md-3">
+                                    <label class="form-label">کالا<span class="text-danger">*</span></label>
+                                    <select name="items[<?php echo $index; ?>][product_id]" class="form-select form-select-sm product-select" required>
+                                        <option value="">انتخاب کالا...</option>
+                                        <?php foreach ($productsData as $product): ?>
+                                            <option value="<?php echo is_object($product) ? $product->id : $product['id']; ?>" <?php echo ((is_object($product) ? $product->id : $product['id']) == $item['product_id']) ? 'selected' : ''; ?>>
+                                                <?php echo Helper::escapeHtml(is_object($product) ? $product->name : $product['name']); ?>
+                                            </option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                    <input type="hidden" name="items[<?php echo $index; ?>][id]" value="<?php echo (int)$item['id']; ?>">
+                                </div>
+                                <div class="col-12 col-md-9">
+                                    <div class="dynamic-fields-row row g-2">
+                                        <?php
+                                        // رندر فیلدهای داینامیک بر اساس گروه محصول
+                                        $groupFields = getFieldsByGroup($fieldsData, $productGroup);
+                                        
+                                        // گروه‌بندی فیلدها بر اساس row_display
+                                        $rows = [];
+                                        foreach ($groupFields as $field) {
+                                            $rowDisplay = $field['row_display'] ?? 'row1';
+                                            if (!isset($rows[$rowDisplay])) {
+                                                $rows[$rowDisplay] = [];
+                                            }
+                                            $rows[$rowDisplay][] = $field;
+                                        }
+
+                                        // رندر کردن هر ردیف فیلد
+                                        foreach (array_keys($rows) as $rowKey) {
+                                            echo '<div class="row g-2 mt-1 w-100">'; // ردیف جدید برای فیلدها
+                                            foreach ($rows[$rowKey] as $field) {
+                                                // تعیین مقدار فیلد از $item
+                                                $fieldValue = $item[$field['name']] ?? null;
+
+                                                // نگاشت نام فیلد در fields.json به نام ستون در $item (از دیتابیس)
+                                                switch ($field['name']) {
+                                                    case 'item_carat_melted':
+                                                    case 'item_carat_manufactured':
+                                                    case 'item_carat_goldbullion':
+                                                    case 'item_carat_silverbullion':
+                                                        $fieldValue = $item['carat'] ?? $fieldValue; break;
+                                                    case 'item_weight_scale_melted':
+                                                    case 'item_weight_scale_manufactured':
+                                                    case 'item_weight_scale_goldbullion':
+                                                    case 'item_weight_scale_silverbullion':
+                                                    case 'item_weight_carat_jewelry':
+                                                        $fieldValue = $item['weight_grams'] ?? $fieldValue; break;
+                                                    case 'item_quantity_manufactured':
+                                                    case 'item_quantity_coin':
+                                                    case 'item_quantity_jewelry':
+                                                        $fieldValue = $item['quantity'] ?? $fieldValue; break;
+                                                    case 'item_unit_price_melted':
+                                                    case 'item_unit_price_manufactured':
+                                                    case 'item_unit_price_coin':
+                                                    case 'item_unit_price_goldbullion':
+                                                    case 'item_unit_price_silverbullion':
+                                                    case 'item_unit_price_jewelry':
+                                                        $fieldValue = $item['unit_price_rials'] ?? $fieldValue; break;
+                                                    case 'item_total_price_melted':
+                                                    case 'item_total_price_manufactured':
+                                                    case 'item_total_price_coin':
+                                                    case 'item_total_price_goldbullion':
+                                                    case 'item_total_price_silverbullion':
+                                                    case 'item_total_price_jewelry':
+                                                        $fieldValue = $item['total_value_rials'] ?? $fieldValue; break;
+                                                    case 'item_tag_number_melted':
+                                                    case 'item_bullion_number_goldbullion':
+                                                    case 'item_bullion_number_silverbullion':
+                                                        $fieldValue = $item['tag_number'] ?? $fieldValue; break;
+                                                    case 'item_assay_office_melted':
+                                                        $fieldValue = $item['assay_office_id'] ?? $fieldValue; break;
+                                                    case 'item_coin_year_coin':
+                                                        $fieldValue = $item['coin_year'] ?? $fieldValue; break;
+                                                    case 'item_vacuum_name_coin':
+                                                        $fieldValue = $item['seal_name'] ?? $fieldValue; break;
+                                                    case 'item_manufacturing_fee_amount_manufactured':
+                                                        $fieldValue = $item['ajrat_rials'] ?? $fieldValue; break;
+                                                    case 'item_workshop_manufactured':
+                                                    case 'item_manufacturer_goldbullion':
+                                                    case 'item_manufacturer_silverbullion':
+                                                        $fieldValue = $item['workshop_name'] ?? $fieldValue; break;
+                                                    case 'item_attachment_weight_manufactured':
+                                                        $fieldValue = $item['stone_weight_grams'] ?? $fieldValue; break;
+                                                    case 'item_description': // فیلد توضیحات عمومی آیتم
+                                                        $fieldValue = $item['description'] ?? $fieldValue; break;
+                                                    case 'item_type_coin': // برای سکه (بانکی/متفرقه)
+                                                        $fieldValue = ($item['is_bank_coin'] ?? false) ? 'bank' : 'misc'; break;
+                                                    case 'item_has_attachments_manufactured': // برای مصنوعات (دارد/ندارد)
+                                                        $fieldValue = ($item['stone_weight_grams'] > 0 || ($item['description'] ?? '') !== '') ? 'yes' : 'no'; break;
+                                                    // فیلدهای سود/کارمزد/مالیات/ارزش افزوده (اینها در دیتابیس ذخیره می‌شوند)
+                                                    case 'item_profit_percent_melted':
+                                                    case 'item_profit_percent_manufactured':
+                                                    case 'item_profit_percent_coin':
+                                                    case 'item_profit_percent_goldbullion':
+                                                    case 'item_profit_percent_silverbullion':
+                                                    case 'item_profit_percent_jewelry':
+                                                        $fieldValue = $item['profit_percent'] ?? $fieldValue; break;
+                                                    case 'item_profit_amount_melted':
+                                                    case 'item_profit_amount_manufactured':
+                                                    case 'item_profit_amount_coin':
+                                                    case 'item_profit_amount_goldbullion':
+                                                    case 'item_profit_amount_silverbullion':
+                                                    case 'item_profit_amount_jewelry':
+                                                        $fieldValue = $item['profit_amount'] ?? $fieldValue; break;
+                                                    case 'item_fee_percent_melted':
+                                                    case 'item_fee_percent_manufactured':
+                                                    case 'item_fee_percent_goldbullion':
+                                                    case 'item_fee_percent_silverbullion':
+                                                    case 'item_fee_percent_jewelry':
+                                                        $fieldValue = $item['fee_percent'] ?? $fieldValue; break;
+                                                    case 'item_fee_amount_melted':
+                                                    case 'item_fee_amount_manufactured':
+                                                    case 'item_fee_amount_goldbullion':
+                                                    case 'item_fee_amount_silverbullion':
+                                                    case 'item_fee_amount_jewelry':
+                                                        $fieldValue = $item['fee_amount'] ?? $fieldValue; break;
+                                                    case 'item_general_tax_melted':
+                                                    case 'item_general_tax_manufactured':
+                                                    case 'item_general_tax_coin':
+                                                    case 'item_general_tax_goldbullion':
+                                                    case 'item_general_tax_silverbullion':
+                                                    case 'item_general_tax_jewelry':
+                                                        // اینها در DB ذخیره می‌شوند و باید نمایش داده شوند
+                                                        $fieldValue = $item['general_tax'] ?? $fieldValue; break;
+                                                    case 'item_vat_melted':
+                                                    case 'item_vat_manufactured':
+                                                    case 'item_vat_coin':
+                                                    case 'item_vat_goldbullion':
+                                                    case 'item_vat_silverbullion':
+                                                    case 'item_vat_jewelry':
+                                                        // اینها در DB ذخیره می‌شوند و باید نمایش داده شوند
+                                                        $fieldValue = $item['vat'] ?? $fieldValue; break;
+                                                }
+                                                // رندر فیلد
+                                                echo renderDynamicFieldHtml($field, $index, $fieldValue, $assayOfficesData);
+                                            }
+                                            echo '</div>'; // بستن ردیف فیلد
+                                        }
+                                        ?>
+                                    </div>
+                                </div>
+                                <div class="col-12 text-end">
+                                    <button type="button" class="btn btn-sm btn-danger remove-item-btn"><i class="fas fa-trash-alt"></i></button>
+                                </div>
+                            </div>
+                        </div>
+                    <?php endforeach;
+                else: // اگر در حالت افزودن هستیم یا هیچ آیتمی وجود ندارد، یک ردیف خالی رندر می‌کنیم ?>
+                    <!-- ردیف‌های اقلام توسط JavaScript رندر می‌شوند -->
+                <?php endif; ?>
+            </div>
+            <button type="button" id="add-transaction-item" class="btn btn-sm btn-outline-success mt-3">
+                <i class="fas fa-plus me-1"></i> افزودن ردیف جدید
+            </button>
+        </div>
+    </div>
+    
+    <!-- خلاصه مالی معامله -->
+    <div class="card shadow-sm mt-4">
+        <div class="card-header">
+            <h5 class="card-title">خلاصه مالی معامله</h5>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-4">
+                    <p>مجموع ارزش اقلام: <span id="summary-sum_base_items"><?php echo Helper::formatRial($transactionData['total_items_value_rials'] ?? 0); ?></span></p>
+                </div>
+                <div class="col-md-4">
+                    <p>مجموع سود/اجرت/کارمزد: <span id="summary-sum_profit_wage_fee"><?php echo Helper::formatRial($transactionData['total_profit_wage_commission_rials'] ?? 0); ?></span></p>
+                </div>
+                <div class="col-md-4">
+                    <p>مجموع مالیات عمومی: <span id="summary-total_general_tax"><?php echo Helper::formatRial($transactionData['total_general_tax_rials'] ?? 0); ?></span></p>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-md-4">
+                    <p>جمع قبل از ارزش افزوده: <span id="summary-sum_before_vat"><?php echo Helper::formatRial($transactionData['total_before_vat_rials'] ?? 0); ?></span></p>
+                </div>
+                <div class="col-md-4">
+                    <p>مجموع ارزش افزوده: <span id="summary-total_vat"><?php echo Helper::formatRial($transactionData['total_vat_rials'] ?? 0); ?></span></p>
+                </div>
+                <div class="col-md-4">
+                    <p class="fw-bold">مبلغ نهایی قابل پرداخت: <span id="summary-final_payable"><?php echo Helper::formatRial($transactionData['final_payable_amount_rials'] ?? 0); ?></span></p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- یادداشت‌ها و دکمه‌های ارسال -->
+    <div class="card shadow-sm mt-4">
+        <div class="card-body">
+            <div class="mb-3">
+                <label for="notes" class="form-label">یادداشت‌ها</label>
+                <textarea id="notes" name="notes" class="form-control" rows="3"><?php echo Helper::escapeHtml($transactionData['notes'] ?? ''); ?></textarea>
+            </div>
+            <hr>
+            <div class="d-flex justify-content-end">
+                <a href="<?php echo $baseUrl; ?>/app/transactions" class="btn btn-secondary me-2">انصراف</a>
+                <button type="submit" class="btn btn-primary px-4">
+                    <i class="fas fa-save me-1"></i> <?php echo $isEditMode ? 'به‌روزرسانی معامله' : 'ثبت معامله'; ?>
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- فیلدهای مخفی برای خلاصه‌سازی که توسط JavaScript به‌روز می‌شوند -->
+    <input type="hidden" name="total_items_value_rials" value="<?php echo (float)($transactionData['total_items_value_rials'] ?? 0); ?>">
+    <input type="hidden" name="total_profit_wage_commission_rials" value="<?php echo (float)($transactionData['total_profit_wage_commission_rials'] ?? 0); ?>">
+    <input type="hidden" name="total_general_tax_rials" value="<?php echo (float)($transactionData['total_general_tax_rials'] ?? 0); ?>">
+    <input type="hidden" name="total_before_vat_rials" value="<?php echo (float)($transactionData['total_before_vat_rials'] ?? 0); ?>">
+    <input type="hidden" name="total_vat_rials" value="<?php echo (float)($transactionData['total_vat_rials'] ?? 0); ?>">
+    <input type="hidden" name="final_payable_amount_rials" value="<?php echo (float)($transactionData['final_payable_amount_rials'] ?? 0); ?>">
+</form>
+
+<!-- Template برای ردیف‌های آیتم معامله که توسط JavaScript استفاده می‌شود -->
+<template id="item-row-template">
+    <div class="transaction-item-row border rounded p-3 mb-3 bg-light">
+        <div class="row g-2 align-items-center">
+            <div class="col-12 col-md-3">
+                <label class="form-label">کالا<span class="text-danger">*</span></label>
+                <select name="items[{index}][product_id]" class="form-select form-select-sm product-select" required>
+                    <option value="">انتخاب کالا...</option>
+                </select>
+            </div>
+            <div class="col-12 col-md-9">
+                <div class="dynamic-fields-row row g-2">
+                    <!-- فیلدهای داینامیک توسط JS در اینجا قرار می‌گیرند -->
+                </div>
+            </div>
+            <div class="col-12 text-end">
+                <button type="button" class="btn btn-sm btn-danger remove-item-btn"><i class="fas fa-trash-alt"></i></button>
+            </div>
+        </div>
+    </div>
+</template>
+
+<!-- Bootstrapping تمام داده‌های مورد نیاز برای JavaScript -->
 <script>
-    window.productsData = <?= json_encode($products_list ?? []) ?>;
-    window.baseUrl = "<?= htmlspecialchars($baseUrl ?? '', ENT_QUOTES, 'UTF-8') ?>";
-    window.MESSAGES = <?= json_encode($messages_from_php_if_any ?? []) ?>;
-    window.allFieldsData = {fields: <?= json_encode(array_values($fieldsFromView ?? [])) ?>};
-    window.allFormulasData = {formulas: <?= json_encode(array_values($formulas ?? [])) ?>};
-    // Pass existing transaction items data to JavaScript for rendering
-    window.transactionItemsData = <?php echo json_encode($transactionItemsData, JSON_UNESCAPED_UNICODE); ?>;
-    window.assayOfficesData = <?php echo json_encode($viewData['assay_offices'] ?? [], JSON_UNESCAPED_UNICODE); ?>;
-    window.categoryIdToBaseCategory = {
-      20: 'melted',
-      21: 'coin',         // کد 21 مربوط به سکه است
-      22: 'manufactured', // کد 22 مربوط به مصنوعات طلا (ساخته شده) است
-      23: 'goldbullion',
-      27: 'jewelry',
-      28: 'silverbullion'
-      // سایر دسته‌ها را در صورت نیاز اضافه کنید
+    window.baseUrl = "<?php echo Helper::escapeHtml($baseUrl); ?>";
+    window.productsData = <?php echo json_encode($productsData, JSON_UNESCAPED_UNICODE | JSON_NUMERIC_CHECK); ?>;
+    window.assayOfficesData = <?php echo json_encode($assayOfficesData, JSON_UNESCAPED_UNICODE | JSON_NUMERIC_CHECK); ?>;
+    window.transactionItemsData = <?php echo json_encode($transactionItemsData, JSON_UNESCAPED_UNICODE | JSON_NUMERIC_CHECK); ?>;
+    window.contactsData = <?php echo json_encode($contactsData, JSON_UNESCAPED_UNICODE | JSON_NUMERIC_CHECK); ?>;
+    window.allFieldsData = <?php echo json_encode(['fields' => $fieldsData], JSON_UNESCAPED_UNICODE | JSON_NUMERIC_CHECK); ?>;
+    window.allFormulasData = <?php echo json_encode(['formulas' => $formulasData], JSON_UNESCAPED_UNICODE | JSON_NUMERIC_CHECK); ?>;
+    // transactionData فقط در حالت ویرایش وجود دارد
+    <?php if ($isEditMode): ?>
+        window.transactionData = <?php echo json_encode($transactionData, JSON_UNESCAPED_UNICODE | JSON_NUMERIC_CHECK); ?>;
+    <?php else: ?>
+        window.transactionData = null; // برای حالت افزودن، داده‌ای وجود ندارد
+    <?php endif; ?>
+    window.defaultSettings = <?php echo json_encode($defaultSettings, JSON_UNESCAPED_UNICODE | JSON_NUMERIC_CHECK); ?>;
+    // برای دسترسی به app.debug در جاوااسکریپت
+    window.phpConfig = {
+        app: {
+            debug: <?php echo json_encode($config['app']['debug'] ?? false); ?>
+        }
     };
 </script>
-<script src="<?= htmlspecialchars($baseUrl, ENT_QUOTES, 'UTF-8') ?>/js/transaction-form.js"></script>
+<!-- بارگذاری اسکریپت اصلی فرم تراکنش -->
+<script src="<?php echo Helper::escapeHtml($baseUrl); ?>/js/transaction-form.js"></script>
 
-<script>
-  // Bootstrap form validation
-(function () {
-  'use strict'
-  var forms = document.querySelectorAll('.needs-validation')
-  Array.prototype.slice.call(forms)
-    .forEach(function (form) {
-      form.addEventListener('submit', function (event) {
-        if (!form.checkValidity()) {
-          event.preventDefault()
-          event.stopPropagation()
-        }
-        form.classList.add('was-validated')
-      }, false)
-    })
-})()
-</script>
+<!-- بارگذاری اسکریپت ابزار دیباگ (فقط در محیط توسعه) -->
+<?php if ($config['app']['debug'] ?? false): ?>
+<script src="<?php echo Helper::escapeHtml($baseUrl); ?>/js/debug-tool.js"></script>
+<?php endif; ?>

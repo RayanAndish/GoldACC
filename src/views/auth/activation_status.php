@@ -22,12 +22,32 @@ $baseUrl = $viewData['baseUrl'] ?? '/';
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?php echo Helper::escapeHtml($pageTitle); ?> | <?php echo Helper::escapeHtml($appName); ?></title>
     <base href="<?php echo Helper::escapeHtml(rtrim($baseUrl, '/') . '/'); ?>/">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.rtl.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css"> <?php // Include main style for consistency? ?>
+    <link rel="stylesheet" href="css/bootstrap.rtl.min.css">
+    <link rel="stylesheet" href="css/all.min.css"/>
+    <link rel="stylesheet" href="css/style.css">
     <style>
          /* Load Vazirmatn font */
-        @font-face { font-family: 'Vazirmatn'; src: url('...') format('woff2 supports variations'), url('...') format('woff2-variations'); font-weight: 100 900; font-style: normal; font-display: swap; }
-        body { font-family: 'Vazirmatn', sans-serif !important; background-color: #f0f2f5; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
+         @font-face {
+        font-family: 'Vazirmatn';
+        /* FIX: Changed font path to local */
+        src: url('../fonts/Vazirmatn-RD[wght].woff2') format('woff2 supports variations'),
+            url('../fonts/Vazirmatn-RD[wght].woff2') format('woff2-variations');
+        font-weight: 100 900;
+        font-style: normal;
+        font-display: swap;
+        }
+        html, body { height: 100%; }
+        body {
+            font-family: 'Vazirmatn', Tahoma, sans-serif !important;
+            background: linear-gradient(135deg, #0d1b2a 0%, #1b263b 100%); /* Deep blue gradient */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px 0; /* Add padding for scroll */
+            color: #e0e1dd;
+        }
         .status-container { text-align: center; max-width: 500px; background-color: #fff; padding: 40px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
         .alert { text-align: center; font-size: 1.1em; }
         .login-link { margin-top: 20px; }
@@ -47,6 +67,6 @@ $baseUrl = $viewData['baseUrl'] ?? '/';
             </div>
         <?php endif; ?>
     </div>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="js/bootstrap.bundle.min.js"></script>
 </body>
 </html>

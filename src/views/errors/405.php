@@ -29,9 +29,9 @@ $requested_url = $_SERVER['REQUEST_URI'] ?? 'نامشخص';
     <meta name="viewport" content="width=device-width, initial-scale=1">
 
     <!-- Bootstrap CSS -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.rtl.min.css" rel="stylesheet">
-    <!-- استفاده از base_url برای مسیر CSS -->
-    <link href="<?= Helper::escapeHtml($base_url) ?>/css/style.css" rel="stylesheet">
+    <link rel="stylesheet" href="css/bootstrap.rtl.min.css">
+    <link rel="stylesheet" href="css/all.min.css"/>
+    <link rel="stylesheet" href="css/style.css">
    <style>
         body {
             font-family: 'Vazirmatn', sans-serif !important;

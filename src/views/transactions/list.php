@@ -14,14 +14,16 @@ $successMessage = $viewData['success_msg'] ?? null;
 $errorMessage = $viewData['error_msg'] ?? null;
 $searchTerm = $viewData['search_term'] ?? '';
 $filters = $viewData['filters'] ?? [];
-$pagination = $viewData['pagination'] ?? null;
+$pagination = $viewData['pagination'] ?? null; // شامل 'pages' آرایه برای لینک‌ها
 $baseUrl = $viewData['baseUrl'] ?? '';
 $contactsForFilter = $viewData['contacts_for_filter'] ?? [];
-$deliveryStatuses = $viewData['delivery_statuses'] ?? [];
-$csrfToken = $viewData['csrf_token'] ?? (function_exists('csrf_token') ? csrf_token() : '');
+$deliveryStatuses = $viewData['delivery_statuses'] ?? []; // از کنترلر می‌آید
+$csrfToken = $viewData['csrf_token'] ?? ''; // CSRF Token از کنترلر می‌آید
 
 $pageBaseUrl = $baseUrl . '/app/transactions';
-$queryParams = array_filter([
+
+// ساخت Query String پایه برای Pagination
+$currentQueryParams = array_filter([
     'search' => $searchTerm,
     'type' => $filters['type'] ?? null,
     'contact' => $filters['contact_id'] ?? null,
@@ -29,7 +31,13 @@ $queryParams = array_filter([
     'start_date' => $filters['start_date_jalali'] ?? null,
     'end_date' => $filters['end_date_jalali'] ?? null,
 ]);
-$queryString = !empty($queryParams) ? '?' . http_build_query($queryParams) : '';
+
+// تابع کمکی برای ساخت URL صفحه
+function getPageUrl($pageNumber, $baseUrl, $baseQueryParams) {
+    $params = $baseQueryParams;
+    $params['p'] = $pageNumber;
+    return $baseUrl . '?' . http_build_query($params);
+}
 ?>
 
 <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
@@ -53,7 +61,7 @@ $queryString = !empty($queryParams) ? '?' . http_build_query($queryParams) : '';
            <i class="fas fa-chevron-down fa-xs ms-1"></i>
         </a>
     </div>
-    <div class="collapse" id="filterCollapse">
+    <div class="collapse <?= !empty(array_filter($filters)) || !empty($searchTerm) ? 'show' : '' ?>" id="filterCollapse">
         <div class="card-body p-2">
             <form method="GET" action="<?= $pageBaseUrl ?>" class="row g-2 align-items-end">
                 <div class="col-lg-3 col-md-6">
@@ -100,11 +108,11 @@ $queryString = !empty($queryParams) ? '?' . http_build_query($queryParams) : '';
 <div class="card shadow-sm">
     <div class="card-header d-flex justify-content-between align-items-center">
         <h5 class="mb-0">لیست معاملات</h5>
-        <?php if ($pagination && $pagination['total_records'] > 0): ?>
+        <?php if ($pagination && $pagination['totalRecords'] > 0): ?>
             <small class="text-muted">
-                نمایش <?= (($pagination['current_page']-1) * $pagination['items_per_page']) + 1; ?>
-                - <?= min($pagination['total_records'], $pagination['current_page'] * $pagination['items_per_page']); ?>
-                از <?= $pagination['total_records']; ?>
+                نمایش <?= $pagination['firstItem']; ?>
+                - <?= $pagination['lastItem']; ?>
+                از <?= $pagination['totalRecords']; ?>
             </small>
         <?php endif; ?>
     </div>
@@ -129,38 +137,40 @@ $queryString = !empty($queryParams) ? '?' . http_build_query($queryParams) : '';
                                 <td class="text-center small fw-bold"><?= (int)$tx['id'] ?></td>
                                 <td class="text-center">
                                     <span class="badge bg-<?= ($tx['transaction_type'] == 'buy') ? 'success' : 'danger'; ?>">
-                                        <?= $tx['transaction_type_farsi'] ?? '?' ?>
+                                        <?= Helper::escapeHtml($tx['transaction_type_farsi'] ?? '?') ?>
                                     </span>
                                 </td>
-                                <td class="small text-nowrap"><?= $tx['transaction_date_persian'] ?? '?' ?></td>
+                                <td class="small text-nowrap"><?= Helper::escapeHtml($tx['transaction_date_persian'] ?? '?') ?></td>
                                 <td class="small">
                                     <?php if (!empty($tx['counterparty_contact_id']) && !empty($tx['counterparty_name'])): ?>
-                                        <a href="<?= $baseUrl ?>/app/contacts/ledger/<?= (int)$tx['counterparty_contact_id'] ?>" title="کارت حساب" class="text-decoration-none">
-                                            <?= $tx['counterparty_name'] ?>
+                                        <a href="<?= Helper::escapeHtml($baseUrl) ?>/app/contacts/ledger/<?= (int)$tx['counterparty_contact_id'] ?>" title="کارت حساب" class="text-decoration-none">
+                                            <?= Helper::escapeHtml($tx['counterparty_name']) ?>
                                         </a>
                                     <?php else: ?>
-                                        <?= $tx['counterparty_name'] ?: '-' ?>
+                                        <?= Helper::escapeHtml($tx['counterparty_name'] ?: '-') ?>
                                     <?php endif; ?>
                                 </td>
-                                <td class="text-center fw-bold number-fa"><?= $tx['total_value_rials_formatted'] ?? '?' ?></td>
+                                <td class="text-center fw-bold number-fa"><?= Helper::escapeHtml($tx['total_value_rials_formatted'] ?? '?') ?></td>
                                 <td class="text-center">
-                                    <span class="badge <?= $tx['delivery_status_class'] ?? 'bg-secondary' ?>">
-                                        <?= $tx['delivery_status_farsi'] ?? '?' ?>
+                                    <span class="badge <?= Helper::escapeHtml($tx['delivery_status_class'] ?? 'bg-secondary') ?>">
+                                        <?= Helper::escapeHtml($tx['delivery_status_farsi'] ?? '?') ?>
                                     </span>
                                 </td>
                                 <td class="text-center text-nowrap">
-                                    <a href="<?= $baseUrl ?>/app/transactions/edit/<?= (int)$tx['id'] ?>" class="btn btn-sm btn-outline-primary btn-action me-1 py-0 px-1" data-bs-toggle="tooltip" title="ویرایش"><i class="fas fa-edit fa-xs"></i></a>
-                                    <form action="<?= $baseUrl ?>/app/transactions/delete/<?= (int)$tx['id'] ?>" method="POST" class="d-inline" onsubmit="return confirm('آیا از حذف معامله #<?= (int)$tx['id'] ?> مطمئن هستید؟');">
+                                    <a href="<?= Helper::escapeHtml($baseUrl) ?>/app/transactions/edit/<?= (int)$tx['id'] ?>" class="btn btn-sm btn-outline-primary btn-action me-1 py-0 px-1" data-bs-toggle="tooltip" title="ویرایش"><i class="fas fa-edit fa-xs"></i></a>
+                                    
+                                    <form action="<?= Helper::escapeHtml($baseUrl) ?>/app/transactions/delete/<?= (int)$tx['id'] ?>" method="POST" class="d-inline" onsubmit="return confirm('آیا از حذف معامله #<?= (int)$tx['id'] ?> مطمئن هستید؟');">
                                         <input type="hidden" name="csrf_token" value="<?= Helper::escapeHtml($csrfToken) ?>">
                                         <button type="submit" class="btn btn-sm btn-outline-danger btn-action me-1 py-0 px-1" data-bs-toggle="tooltip" title="حذف"><i class="fas fa-trash fa-xs"></i></button>
                                     </form>
+
                                     <?php if ($tx['can_complete_receipt'] ?? false): ?>
-                                        <form action="<?= $baseUrl ?>/app/transactions/complete-delivery/<?= (int)$tx['id'] ?>/receipt" method="POST" class="d-inline" onsubmit="return confirm('آیا دریافت کالای معامله #<?= (int)$tx['id'] ?> را تایید می‌کنید؟');">
+                                        <form action="<?= Helper::escapeHtml($baseUrl) ?>/app/transactions/complete-delivery/<?= (int)$tx['id'] ?>/receipt" method="POST" class="d-inline" onsubmit="return confirm('آیا دریافت کالای معامله #<?= (int)$tx['id'] ?> را تایید می‌کنید؟');">
                                             <input type="hidden" name="csrf_token" value="<?= Helper::escapeHtml($csrfToken) ?>">
                                             <button type="submit" class="btn btn-sm btn-outline-success btn-action py-0 px-1" data-bs-toggle="tooltip" title="تایید دریافت کالا"><i class="fas fa-download fa-xs"></i></button>
                                         </form>
                                     <?php elseif ($tx['can_complete_delivery'] ?? false): ?>
-                                        <form action="<?= $baseUrl ?>/app/transactions/complete-delivery/<?= (int)$tx['id'] ?>/delivery" method="POST" class="d-inline" onsubmit="return confirm('آیا تحویل کالای معامله #<?= (int)$tx['id'] ?> را تایید می‌کنید؟');">
+                                        <form action="<?= Helper::escapeHtml($baseUrl) ?>/app/transactions/complete-delivery/<?= (int)$tx['id'] ?>/delivery" method="POST" class="d-inline" onsubmit="return confirm('آیا تحویل کالای معامله #<?= (int)$tx['id'] ?> را تایید می‌کنید؟');">
                                             <input type="hidden" name="csrf_token" value="<?= Helper::escapeHtml($csrfToken) ?>">
                                             <button type="submit" class="btn btn-sm btn-outline-warning btn-action py-0 px-1" data-bs-toggle="tooltip" title="تایید تحویل کالا"><i class="fas fa-upload fa-xs"></i></button>
                                         </form>
@@ -175,39 +185,35 @@ $queryString = !empty($queryParams) ? '?' . http_build_query($queryParams) : '';
             </div>
         <?php elseif (!$errorMessage): ?>
             <p class="text-center text-muted p-4 mb-0">
-                <?= !empty($queryParams) ? 'هیچ معامله‌ای مطابق با فیلترهای انتخابی یافت نشد.' : 'هیچ معامله‌ای ثبت نشده است.'; ?>
+                <?= !empty(array_filter($currentQueryParams)) || !empty($searchTerm) ? 'هیچ معامله‌ای مطابق با فیلترهای انتخابی یافت نشد.' : 'هیچ معامله‌ای ثبت نشده است.'; ?>
             </p>
         <?php endif; ?>
     </div>
     <?php if ($pagination && $pagination['total_pages'] > 1): ?>
-        <?php
-        $baseUrlForPagination = $pageBaseUrl . $queryString;
-        ?>
         <nav class="d-flex justify-content-center my-3">
             <ul class="pagination pagination-sm mb-0">
-                <?php for ($i = 1; $i <= $pagination['total_pages']; $i++): ?>
-                    <li class="page-item <?= ($i == $pagination['current_page']) ? 'active' : '' ?>">
-                        <a class="page-link" href="<?= $baseUrlForPagination . (strpos($baseUrlForPagination, '?') !== false ? '&' : '?') . 'p=' . $i ?>"> <?= $i ?> </a>
-                    </li>
-                <?php endfor; ?>
+                <li class="page-item <?= $pagination['hasPrevPage'] ? '' : 'disabled' ?>">
+                    <a class="page-link" href="<?= getPageUrl($pagination['prevPage'], $pageBaseUrl, $currentQueryParams) ?>" aria-label="قبلی">
+                        <span aria-hidden="true">&laquo;</span>
+                    </a>
+                </li>
+                <?php foreach ($pagination['pages'] as $page): ?>
+                    <?php if ($page['isEllipsis']): ?>
+                        <li class="page-item disabled"><span class="page-link">...</span></li>
+                    <?php else: ?>
+                        <li class="page-item <?= $page['isCurrent'] ? 'active' : '' ?>">
+                            <a class="page-link" href="<?= getPageUrl($page['num'], $pageBaseUrl, $currentQueryParams) ?>">
+                                <?= $page['num'] ?>
+                            </a>
+                        </li>
+                    <?php endif; ?>
+                <?php endforeach; ?>
+                <li class="page-item <?= $pagination['hasNextPage'] ? '' : 'disabled' ?>">
+                    <a class="page-link" href="<?= getPageUrl($pagination['nextPage'], $pageBaseUrl, $currentQueryParams) ?>" aria-label="بعدی">
+                        <span aria-hidden="true">&raquo;</span>
+                    </a>
+                </li>
             </ul>
         </nav>
     <?php endif; ?>
 </div>
-
-<?php // JS for datepicker and tooltips ?>
-<link rel="stylesheet" href="<?php echo $baseUrl; ?>/css/jalalidatepicker.min.css" />
-<script src="<?php echo $baseUrl; ?>/js/jalalidatepicker.min.js"></script>
-<script>
-    jalaliDatepicker.startWatch({ selector: '.jalali-datepicker', showTodayBtn: true, showCloseBtn: true, format: 'Y/m/d' });
-    
-    // اصلاح استفاده از bootstrap برای tooltips
-    document.addEventListener('DOMContentLoaded', function() {
-        var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
-        if (typeof bootstrap !== 'undefined') {
-            var tooltipList = tooltipTriggerList.map(function (el) { 
-                return new bootstrap.Tooltip(el); 
-            });
-        }
-    });
-</script>

@@ -23,20 +23,21 @@ $oldInput = $viewData['oldInput'] ?? [];
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?php echo Helper::escapeHtml($pageTitle); ?> | <?php echo Helper::escapeHtml($appName); ?></title>
     <base href="<?php echo Helper::escapeHtml(rtrim($baseUrl, '/') . '/'); ?>/">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.rtl.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"/>
-    <link rel="stylesheet" href="css/style.css"> <?php // Include main style if needed ?>
+    <link rel="stylesheet" href="css/bootstrap.rtl.min.css">
+    <link rel="stylesheet" href="css/all.min.css"/>
+    <link rel="stylesheet" href="css/style.css">
 
     <?php // Reuse login styles for consistency (or create specific register styles) ?>
     <style>
         /* Basic styles - Copy/Adapt from login.php for consistent look */
         @font-face {
-          font-family: 'Vazirmatn';
-          src: url('https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Round-Dots/fonts/webfonts/Vazirmatn-RD[wght].woff2') format('woff2 supports variations'),
-               url('https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Round-Dots/fonts/webfonts/Vazirmatn-RD[wght].woff2') format('woff2-variations');
-          font-weight: 100 900;
-          font-style: normal;
-          font-display: swap;
+        font-family: 'Vazirmatn';
+        /* FIX: Changed font path to local */
+        src: url('../fonts/Vazirmatn-RD[wght].woff2') format('woff2 supports variations'),
+            url('../fonts/Vazirmatn-RD[wght].woff2') format('woff2-variations');
+        font-weight: 100 900;
+        font-style: normal;
+        font-display: swap;
         }
         html, body { height: 100%; }
         body {
@@ -140,7 +141,7 @@ $oldInput = $viewData['oldInput'] ?? [];
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="js/bootstrap.bundle.min.js"></script>
     <script>
         // Optional: Add client-side validation if needed, although server-side is primary
     </script>

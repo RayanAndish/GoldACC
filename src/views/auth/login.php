@@ -32,21 +32,21 @@ $baseUrl = $viewData['baseUrl'] ?? '/'; // Get base URL
     <base href="<?php echo Helper::escapeHtml(rtrim($baseUrl, '/') . '/'); ?>/">
 
     <?php // --- CSS Includes --- ?>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.rtl.min.css" rel="stylesheet" integrity="sha384-nU14brUcp6StFntEOOEBvcJm4huWjB0fgDWUFhBCFyWSdkKXxN/lMoUHfTWftEng" crossorigin="anonymous">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"/>
-    <?php // Link to main style.css if login page uses shared styles, or add login-specific CSS ?>
+    <link rel="stylesheet" href="css/bootstrap.rtl.min.css">
+    <link rel="stylesheet" href="css/all.min.css"/>
     <link rel="stylesheet" href="css/style.css">
 
     <?php // --- Modern Deep Ocean Theme Styles --- ?>
     <style>
         /* Load Vazirmatn font */
         @font-face {
-          font-family: 'Vazirmatn';
-          src: url('https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Round-Dots/fonts/webfonts/Vazirmatn-RD[wght].woff2') format('woff2 supports variations'),
-               url('https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Round-Dots/fonts/webfonts/Vazirmatn-RD[wght].woff2') format('woff2-variations');
-          font-weight: 100 900;
-          font-style: normal;
-          font-display: swap;
+        font-family: 'Vazirmatn';
+        /* FIX: Changed font path to local */
+        src: url('../fonts/Vazirmatn-RD[wght].woff2') format('woff2 supports variations'),
+            url('../fonts/Vazirmatn-RD[wght].woff2') format('woff2-variations');
+        font-weight: 100 900;
+        font-style: normal;
+        font-display: swap;
         }
         html, body { height: 100%; }
         body {
@@ -222,7 +222,7 @@ $baseUrl = $viewData['baseUrl'] ?? '/'; // Get base URL
     </div>
 
     <?php // --- JS Includes --- ?>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js" integrity="sha384-C6RzsynM9kWDrMNeT87bh95OGNyZPhcTNXj1NW7RuBCsyN/o0jlpcV8Qyq46cDfL" crossorigin="anonymous"></script>
+    <script src="js/bootstrap.bundle.min.js"></script>
     <?php // Bootstrap Form Validation Script ?>
     <script>
         (() => {

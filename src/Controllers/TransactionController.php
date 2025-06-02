@@ -1,41 +1,28 @@
 <?php
 
-namespace App\Controllers; // Namespace مطابق با پوشه src/Controllers
+namespace App\Controllers;
 
 use PDO;
 use Monolog\Logger;
-use Throwable; // For catching exceptions
-use PDOException; // For specific DB exceptions
-use Exception; // For general exceptions
-use Morilog\Jalali\Jalalian;
-
-// Core & Base
+use Throwable;
+use Exception;
 use App\Core\ViewRenderer;
 use App\Controllers\AbstractController;
-
-// Dependencies
 use App\Repositories\TransactionRepository;
-use App\Repositories\ContactRepository; // For contact dropdown
-use App\Repositories\AssayOfficeRepository; // For assay office dropdown
-use App\Repositories\ProductRepository; // For product dropdown and details
-use App\Repositories\TransactionItemRepository; // For saving/updating items
-use App\Repositories\InventoryLedgerRepository; // For inventory tracking
-use App\Services\DeliveryService; // To complete delivery/receipt actions
-use App\Repositories\InventoryRepository; // Needed for temporary revert logic
-use App\Repositories\CoinInventoryRepository; // Needed for temporary revert logic
-use App\Utils\Helper; // Utility functions
+use App\Repositories\ContactRepository;
+use App\Repositories\AssayOfficeRepository;
+use App\Repositories\ProductRepository;
+use App\Repositories\TransactionItemRepository;
+use App\Repositories\InventoryLedgerRepository;
+use App\Services\DeliveryService;
+use App\Services\FormulaService;
+use App\Models\TransactionItem;
+use App\Utils\Helper;
 use App\Repositories\SettingsRepository;
-use App\core\CSRFProtector;
+use Morilog\Jalali\Jalalian; // اضافه شده برای استفاده از Jalalian
 
-/**
- * TransactionController handles HTTP requests related to gold transactions.
- * Manages listing, add/edit forms, save/delete processing, and delivery completion.
- * Inherits from AbstractController.
- */
 class TransactionController extends AbstractController
 {
-
-    // Dependencies
     private TransactionRepository $transactionRepository;
     private ContactRepository $contactRepository;
     private AssayOfficeRepository $assayOfficeRepository;
@@ -43,32 +30,17 @@ class TransactionController extends AbstractController
     private TransactionItemRepository $transactionItemRepository;
     private InventoryLedgerRepository $inventoryLedgerRepository;
     private DeliveryService $deliveryService;
-    // --- Temporary Dependencies for Revert Logic (Should be moved to a dedicated Service) ---
-    private InventoryRepository $inventoryRepository;
-    private CoinInventoryRepository $coinInventoryRepository;
+    private FormulaService $formulaService;
     private SettingsRepository $settingsRepository;
-    // --- End Temporary Dependencies ---
 
-    /**
-     * Constructor. Injects dependencies.
-     *
-     * @param PDO $db
-     * @param Logger $logger
-     * @param array $config
-     * @param ViewRenderer $viewRenderer
-     * @param array $services Array of application services.
-     * @throws \Exception If required repositories/services are missing.
-     */
     public function __construct(
         PDO $db,
         Logger $logger,
         array $config,
         ViewRenderer $viewRenderer,
-        array $services // Receive the master services array
+        array $services
     ) {
-        parent::__construct($db, $logger, $config, $viewRenderer, $services); // Pass all to parent
-
-        // Retrieve specific dependencies
+        parent::__construct($db, $logger, $config, $viewRenderer, $services);
         $required = [
             'transactionRepository' => TransactionRepository::class,
             'contactRepository' => ContactRepository::class,
@@ -77,25 +49,29 @@ class TransactionController extends AbstractController
             'transactionItemRepository' => TransactionItemRepository::class,
             'inventoryLedgerRepository' => InventoryLedgerRepository::class,
             'deliveryService' => DeliveryService::class,
-            // Temporary for revert logic
-            'inventoryRepository' => InventoryRepository::class,
-            'coinInventoryRepository' => CoinInventoryRepository::class,
             'settingsRepository' => SettingsRepository::class,
         ];
         foreach ($required as $prop => $class) {
             if (!isset($services[$prop]) || !$services[$prop] instanceof $class) {
-                throw new \Exception("{$class} not found or invalid for TransactionController.");
+                throw new Exception("{$class} not found or invalid for TransactionController.");
             }
             $this->$prop = $services[$prop];
         }
-        $this->settingsRepository = $services['settingsRepository'];
-        $this->logger->debug("TransactionController initialized.");
+        // FIX: FormulaService باید از services تزریق شود یا به درستی مقداردهی شود
+        // فرض می‌کنیم FormulaService در index.php به services اضافه شده است.
+        if (!isset($services['formulaService']) || !$services['formulaService'] instanceof FormulaService) {
+            // اگر FormulaService به عنوان یک سرویس تزریق نشده، آن را اینجا مقداردهی اولیه می‌کنیم.
+            // این حالت ایده‌آل نیست و بهتر است از کانتینر DI استفاده شود.
+            $fieldsJson = $this->config['app']['global_json_strings']['fields'] ?? '[]';
+            $formulasJson = $this->config['app']['global_json_strings']['formulas'] ?? '[]';
+            $fieldsData = json_decode($fieldsJson, true)['fields'] ?? [];
+            $formulasData = json_decode($formulasJson, true)['formulas'] ?? [];
+            $this->formulaService = new FormulaService($this->logger, $formulasData, $fieldsData);
+        } else {
+            $this->formulaService = $services['formulaService'];
+        }
     }
-
-    /**
-     * Displays the list of transactions with filters, search, and pagination.
-     * Route: /app/transactions (GET)
-     */
+    
     public function index(): void
     {
         $this->requireLogin();
@@ -119,35 +95,10 @@ class TransactionController extends AbstractController
             'end_date_jalali' => trim(filter_input(INPUT_GET, 'end_date', FILTER_DEFAULT) ?? ''),
         ];
 
-        $filters['start_date_sql'] = null;
-        if (!empty($filters['start_date_jalali'])) {
-            try {
-                $jalaliDate = preg_replace('#\s.*#', '', $filters['start_date_jalali']);
-                $parts = preg_split('/[-\/]/', $jalaliDate);
-                if (count($parts) === 3 && ctype_digit($parts[0]) && ctype_digit($parts[1]) && ctype_digit($parts[2])) {
-                    $filters['start_date_sql'] = (new Jalalian((int)$parts[0], (int)$parts[1], (int)$parts[2]))->toCarbon()->toDateString();
-                }
-            } catch (\Exception $e) {
-                $this->logger->warning('Failed to parse start_date_jalali to SQL.', ['date' => $filters['start_date_jalali'], 'error' => $e->getMessage()]);
-            }
-        }
+        // استفاده از Helper برای تبدیل تاریخ شمسی به SQL
+        $filters['start_date_sql'] = Helper::parseJalaliDateToSql($filters['start_date_jalali']);
+        $filters['end_date_sql'] = Helper::parseJalaliDateToSql($filters['end_date_jalali'], true); // true برای انتهای روز
 
-        $filters['end_date_sql'] = null;
-        if (!empty($filters['end_date_jalali'])) {
-            try {
-                $jalaliDate = preg_replace('#\s.*#', '', $filters['end_date_jalali']);
-                $parts = preg_split('/[-\/]/', $jalaliDate);
-                if (count($parts) === 3 && ctype_digit($parts[0]) && ctype_digit($parts[1]) && ctype_digit($parts[2])) {
-                    $filters['end_date_sql'] = (new Jalalian((int)$parts[0], (int)$parts[1], (int)$parts[2]))->toCarbon()->toDateString();
-                }
-            } catch (\Exception $e) {
-                $this->logger->warning('Failed to parse end_date_jalali to SQL.', ['date' => $filters['end_date_jalali'], 'error' => $e->getMessage()]);
-            }
-        }
-
-        if ($filters['end_date_sql']) {
-            $filters['end_date_sql'] .= ' 23:59:59';
-        }
         // Clean up null/empty filters before passing to repository
         $activeFilters = array_filter($filters, function ($value) {
             return $value !== false && $value !== '' && $value !== null;
@@ -168,7 +119,8 @@ class TransactionController extends AbstractController
                 $this->formatTransactionForListView($tx);
             } unset($tx);
 
-            $paginationData = $this->generatePaginationDataLocal($currentPage, $totalPages, $totalRecords, $itemsPerPage);
+            // استفاده از Helper::generatePaginationData
+            $paginationData = Helper::generatePaginationData($currentPage, $totalPages, $totalRecords, $itemsPerPage);
             $this->logger->debug("Transactions list fetched.", ['count' => count($transactions), 'total' => $totalRecords]);
 
         } catch (Throwable $e) {
@@ -178,7 +130,8 @@ class TransactionController extends AbstractController
                 $errorMessage['text'] .= " جزئیات: " . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8');
             }
             $transactions = [];
-            $paginationData = $this->generatePaginationDataLocal(1, 1, 0, $itemsPerPage);
+            // استفاده از Helper::generatePaginationData برای حالت خطا
+            $paginationData = Helper::generatePaginationData(1, 1, 0, $itemsPerPage);
         }
 
         // Fetch contacts for filter dropdown
@@ -198,281 +151,51 @@ class TransactionController extends AbstractController
             'search_term'    => htmlspecialchars($searchTerm, ENT_QUOTES, 'UTF-8'),
             'filters'        => $filters, // Pass original filters (with Jalali dates) back to view
             'contacts_for_filter' => $contactsForFilter, // Contacts for dropdown
-             'delivery_statuses' => $this->getDeliveryStatusOptionsLocal(), // Get statuses for dropdown
-            'pagination'     => $paginationData
+            // استفاده از Helper::getDeliveryStatusOptions()
+            'delivery_statuses' => Helper::getDeliveryStatusOptions(), // Get statuses for dropdown
+            'pagination'     => $paginationData,
+            'csrf_token'     => Helper::generateCsrfToken() // تولید CSRF Token برای فرم‌ها
         ]);
     }
 
-    /** Helper function to format transaction data for list view */
-    private function formatTransactionForListView(array &$tx): void
-    {
-        $tx['transaction_type_farsi'] = match ($tx['transaction_type'] ?? '') {
-            'buy' => 'خرید', 'sell' => 'فروش', default => '؟'
-        };
-        $tx['total_value_rials_formatted'] = Helper::formatRial($tx['total_items_value_rials'] ?? $tx['total_value_rials'] ?? 0);
-        // تبدیل تاریخ میلادی به شمسی با Jalalian
-        if (!empty($tx['transaction_date'])) {
-            try {
-                $dt = new \DateTime($tx['transaction_date']);
-                $jalali = Jalalian::fromDateTime($dt);
-                $tx['transaction_date_persian'] = $jalali->format('Y/m/d H:i');
-            } catch (\Exception $e) {
-                $tx['transaction_date_persian'] = '-';
-            }
-        } else {
-            $tx['transaction_date_persian'] = '-';
-        }
-        $tx['counterparty_name'] = Helper::escapeHtml($tx['counterparty_name'] ?? '[نامشخص]');
-        $tx['delivery_status_farsi'] = Helper::translateDeliveryStatus($tx['delivery_status'] ?? '');
-        $tx['delivery_status_class'] = Helper::getDeliveryStatusClass($tx['delivery_status'] ?? '');
-        $tx['can_complete_delivery'] = ($tx['delivery_status'] ?? '') === 'pending_delivery';
-        $tx['can_complete_receipt'] = ($tx['delivery_status'] ?? '') === 'pending_receipt';
-        $tx['notes_tooltip'] = Helper::escapeHtml($tx['notes'] ?? '');
-        $tx['notes_short'] = mb_substr($tx['notes'] ?? '', 0, 30, 'UTF-8') . (mb_strlen($tx['notes'] ?? '') > 30 ? '...' : '');
-        if (isset($tx['gold_product_type']) && str_starts_with($tx['gold_product_type'], 'coin_')) {
-            $tx['base_price_formatted'] = Helper::formatRial($tx['unit_price'] ?? 0);
-        } else {
-            $mazanehPrice = $tx['mazaneh_price'] ?? 0;
-            $tx['base_price_formatted'] = Helper::formatRial($mazanehPrice);
-            $tx['mazaneh_price_formatted'] = Helper::formatRial($mazanehPrice);
-        }
-    }
-
-    private function getDeliveryStatusOptionsLocal(bool $forFilter = false): array
-    {
-        $statuses = [
-            'pending_receipt' => 'منتظر دریافت',
-            'pending_delivery' => 'در صف تحویل',
-            'completed' => 'تکمیل شده',
-            'cancelled' => 'لغو شده',
-        ];
-
-        if ($forFilter) {
-            return ['all' => 'همه وضعیت‌ها'] + $statuses;
-        }
-        return $statuses;
-    }
-
-    private function generatePaginationDataLocal(int $currentPage, int $totalPages, int $totalRecords, int $itemsPerPage, int $linksToShow = 5): array
-    {
-        $pagination = [
-            'currentPage' => $currentPage,
-            'totalPages' => $totalPages,
-            'totalRecords' => $totalRecords,
-            'itemsPerPage' => $itemsPerPage,
-            'hasNextPage' => $currentPage < $totalPages,
-            'hasPrevPage' => $currentPage > 1,
-            'nextPage' => $currentPage + 1,
-            'prevPage' => $currentPage - 1,
-            'pages' => [],
-            'firstItem' => ($totalRecords > 0) ? (($currentPage - 1) * $itemsPerPage) + 1 : 0,
-            'lastItem' => ($totalRecords > 0) ? min($currentPage * $itemsPerPage, $totalRecords) : 0,
-        ];
-
-        if ($totalPages <= 1) {
-            return $pagination;
-        }
-
-        $start = max(1, $currentPage - (int)floor(($linksToShow - 1) / 2));
-        $end = min($totalPages, $currentPage + (int)ceil(($linksToShow - 1) / 2));
-
-        if ($end - $start + 1 < $linksToShow) {
-            if ($start === 1) {
-                $end = min($totalPages, $start + $linksToShow - 1);
-            } elseif ($end === $totalPages) {
-                $start = max(1, $end - $linksToShow + 1);
-            }
-        }
-
-        if ($start > 1) {
-            $pagination['pages'][] = ['num' => 1, 'isCurrent' => false, 'isEllipsis' => false];
-            if ($start > 2) {
-                $pagination['pages'][] = ['num' => '...', 'isCurrent' => false, 'isEllipsis' => true];
-            }
-        }
-
-        for ($i = $start; $i <= $end; $i++) {
-            $pagination['pages'][] = ['num' => $i, 'isCurrent' => $i === $currentPage, 'isEllipsis' => false];
-        }
-
-        if ($end < $totalPages) {
-            if ($end < $totalPages - 1) {
-                $pagination['pages'][] = ['num' => '...', 'isCurrent' => false, 'isEllipsis' => true];
-            }
-            $pagination['pages'][] = ['num' => $totalPages, 'isCurrent' => false, 'isEllipsis' => false];
-        }
-
-        return $pagination;
-    }
-
-    private function getDefaultSettings(): array
-    {
-        return [
-            'melted_profit_percentage' => $this->config['defaults']['melted_profit_percentage'] ?? 0,
-            'melted_fee_percentage' => $this->config['defaults']['melted_fee_percentage'] ?? 0,
-            'manufactured_profit_percentage' => $this->config['defaults']['manufactured_profit_percentage'] ?? 7,
-            'bullion_profit_percentage' => $this->config['defaults']['bullion_profit_percentage'] ?? 0,
-            'bullion_fee_percentage' => $this->config['defaults']['bullion_fee_percentage'] ?? 0,
-            // مقادیر مالیات و ارزش افزوده حذف شد چون نرخ و فعال بودن آن‌ها از مدل محصول خوانده می‌شود
-        ];
-    }
-    
-    private function getFieldsAndFormulas(): array
-    {
-    $fieldsFromView = [];
-    $formulas = [];
-    $fieldsFilePath = realpath(__DIR__ . '/../../config/fields.json');
-    $formulasFilePath = realpath(__DIR__ . '/../../config/formulas.json');
-    if ($fieldsFilePath && file_exists($fieldsFilePath)) {
-        $fieldsJsonContent = file_get_contents($fieldsFilePath);
-        $fieldsData = json_decode($fieldsJsonContent, true);
-        if (json_last_error() === JSON_ERROR_NONE && isset($fieldsData['fields'])) {
-            $fieldsFromView = $fieldsData['fields'];
-        } else {
-            $this->logger->error('Failed to parse fields.json or "fields" key missing.', ['path' => $fieldsFilePath, 'json_error' => json_last_error_msg()]);
-            $loadingError = ($loadingError ? $loadingError . '<br>' : '') . 'خطا در بارگذاری ساختار فیلدهای فرم.';
-        }
-    } else {
-        $this->logger->error('fields.json not found.', ['path' => $fieldsFilePath]);
-        $loadingError = ($loadingError ? $loadingError . '<br>' : '') . 'فایل تعریف فیلدها (fields.json) یافت نشد.';
-    }
-    if ($formulasFilePath && file_exists($formulasFilePath)) {
-        $formulasJsonContent = file_get_contents($formulasFilePath);
-        $formulasData = json_decode($formulasJsonContent, true);
-        if (json_last_error() === JSON_ERROR_NONE && isset($formulasData['formulas'])) {
-            // فقط فرمول‌های مربوط به فرم تراکنش را نگه دار
-            $formulas = array_filter($formulasData['formulas'], function($formula) {
-                return isset($formula['form']) && $formula['form'] === 'transactions/form.php';
-            });
-        } else {
-            $this->logger->error('Failed to parse formulas.json or "formulas" key missing.', ['path' => $formulasFilePath, 'json_error' => json_last_error_msg()]);
-            $loadingError = ($loadingError ? $loadingError . '<br>' : '') . 'خطا در بارگذاری ساختار فرمول‌های فرم.';
-        }
-    } else {
-        $this->logger->error('formulas.json not found.', ['path' => $formulasFilePath]);
-        $loadingError = ($loadingError ? $loadingError . '<br>' : '') . 'فایل تعریف فرمول‌ها (formulas.json) یافت نشد.';
-    }
-    return [$fieldsFromView, $formulas];
-    }
-
-    private function getGroupedProducts(): array
-    {
-        $productsArray = $this->productRepository->findAll(['is_active' => true], true);
-        $products_list = $productsArray;
-        $products_by_id = [];
-        $groupedProducts = [];
-        foreach ($productsArray as $p) {
-            $productId = is_object($p) ? $p->id : $p['id'];
-            if ($productId) {
-                $products_by_id[$productId] = $p;
-            }
-        }
-        $groupedProducts = [];
-        foreach ($products_list as $product) {
-            $categoryName = '';
-            if (is_object($product) && isset($product->category) && isset($product->category->name)) {
-                $categoryName = $product->category->name;
-            } elseif (is_array($product) && isset($product['category']['name'])) {
-                $categoryName = $product['category']['name'];
-            } else {
-                $categoryName = 'سایر';
-            }
-            $groupedProducts[$categoryName][] = $product;
-        }
-        return [$groupedProducts, $products_list];
-    }
-
-    /**
-     * Displays the form for adding a new transaction.
-     * Route: /app/transactions/add (GET)
-     */
     public function showAddForm(): void
     {
         $this->requireLogin();
-        // Optional: Permission check
-
         $pageTitle = "ثبت معامله جدید";
-        $errorMessage = $this->getFlashMessage('form_error');
-        
-        // لاگ کردن پیام خطا برای بررسی
-        $this->logger->debug("Form error message in showAddForm", [
-            'form_error' => $errorMessage,
-            'is_array' => is_array($errorMessage),
-            'has_text' => is_array($errorMessage) && isset($errorMessage['text']),
-            'text_value' => is_array($errorMessage) && isset($errorMessage['text']) ? $errorMessage['text'] : null
-        ]);
-        
-        $sessionKey = 'transaction_add_data';
-        $formData = $_SESSION[$sessionKey] ?? null;
-        if ($formData) {
-            unset($_SESSION[$sessionKey]);
-        }
-
-        $contacts = [];
-        $assayOffices = [];
-        $products_list = [];
-        $products_by_id = [];
         $loadingError = null;
         try {
             $contacts = $this->contactRepository->getAll();
             $assayOffices = $this->assayOfficeRepository->getAll();
-            // productsArray
-            list($groupedProducts, $products_list) = $this->getGroupedProducts();
+            $products = $this->productRepository->getAllActiveWithCategory();
         } catch (Throwable $e) {
             $this->logger->error("Error fetching dropdown data for add transaction form.", ['exception' => $e]);
             $loadingError = "خطا در بارگذاری لیست‌های پیش‌نیاز.";
+            $contacts = $assayOffices = $products = [];
         }
-        // --- بارگذاری فرمول‌ها و فیلدها برای FormulaService (حتماً قبل از استفاده) ---
-        list($fieldsFromView, $formulas) = $this->getFieldsAndFormulas();
-        if (!is_array($formulas)) $formulas = [];
-        $formulaService = new \App\Services\FormulaService($this->logger, $formulas, $fieldsFromView);
-        $defaults = $this->getDefaultSettings();
 
-        $transaction = null;
-        $transactionItems = [];
-        if (
-            isset($formData) && is_array($formData)
-        ) {
-            $transaction = $formData;
-            $transactionItems = $formData['items'] ?? [];
-        }
-        $successMessage = $this->getFlashMessage('transaction_success');
-
-        // لاگ کردن پیام خطا قبل از ارسال به view
-        $this->logger->debug("Messages before rendering", [
-            'error_message' => $errorMessage,
-            'success_message' => $successMessage
-        ]);
-
+        // استفاده از global_json_strings_for_footer که در AbstractController تزریق می‌شود
+        $fieldsData = json_decode($this->config['app']['global_json_strings']['fields'] ?? '[]', true)['fields'] ?? [];
+        $formulasData = json_decode($this->config['app']['global_json_strings']['formulas'] ?? '[]', true)['formulas'] ?? [];
+        
         $this->render('transactions/form', [
-            'page_title'         => $pageTitle,
-            'form_action'        => $this->config['app']['base_url'] . '/app/transactions/save',
-            'transaction'        => $transaction,
-            'transaction_items'  => $transactionItems,
-            'contacts'           => $contacts,
-            'assay_offices'      => $assayOffices,
-            'groupedProducts'    => $groupedProducts ?? [],
-            'products_list'      => $products_list,
-            'fields'             => $fieldsFromView,
-            'formulas'           => $formulas,
-            'is_edit_mode'       => false,
-            'submit_button_text' => 'ثبت معامله',
-            'error_message'      => $errorMessage,
-            'success_message'    => $successMessage, // Pass success message
-            'loading_error'      => $loadingError,
-            'delivery_statuses'  => $this->getDeliveryStatusOptionsLocal(true),
-            'default_settings'   => $defaults,
-            'csrf_token'         => \App\Utils\Helper::generateCsrfToken(),
-            'baseUrl'            => $this->config['app']['base_url']
+            'page_title' => $pageTitle,
+            'is_edit_mode' => false,
+            'form_action' => $this->config['app']['base_url'] . '/app/transactions/save',
+            'loading_error' => $loadingError,
+            'csrf_token' => Helper::generateCsrfToken(),
+            'contactsData' => $contacts,
+            'assayOfficesData' => $assayOffices,
+            'productsData' => $products,
+            'fieldsData' => $fieldsData,
+            'formulasData' => $formulasData,
+            'transactionData' => $_SESSION['transaction_form_data'] ?? null,
+            'transactionItemsData' => $_SESSION['transaction_form_data']['items'] ?? [],
+            'default_settings' => $this->getDefaultSettings(), // اضافه شده
+            'config' => $this->config // برای دسترسی به app.debug در View
         ]);
+        unset($_SESSION['transaction_form_data']);
     }
-
-    /**
-     * Displays the form for editing an existing transaction.
-     * Route: /app/transactions/edit/{id} (GET)
-     *
-     * @param int $transactionId The ID of the transaction to edit.
-     */
+    
     public function showEditForm(int $transactionId): void
     {
         $this->requireLogin();
@@ -505,20 +228,22 @@ class TransactionController extends AbstractController
             
             $items = $transaction['items'] ?? [];
             
-            // استفاده از داده‌های فرم اگر وجود داشته باشد
+            // استفاده از داده‌های فرم اگر وجود داشته باشد (برای repopulation)
             if ($formData) {
-                $transaction = $formData;
+                // merge کردن داده‌های transaction اصلی با formData
+                $transaction = array_merge($transaction, $formData);
                 $items = $formData['items'] ?? $items;
             }
             
             // دریافت لیست‌های مورد نیاز
             $assayOffices = $this->assayOfficeRepository->getAll();
             $contacts = $this->contactRepository->getAll();
-            list($groupedProducts, $productsList) = $this->getGroupedProducts();
-            $products = $productsList;
+            // از getAllActiveWithCategory استفاده شود که Product Model برمی‌گرداند
+            $products = $this->productRepository->getAllActiveWithCategory();
             
-            // بارگذاری فیلدها و فرمول‌ها از فایل‌های JSON
-            list($fieldsFromView, $formulas) = $this->getFieldsAndFormulas();
+            // بارگذاری فیلدها و فرمول‌ها از global_json_strings
+            $fieldsFromView = json_decode($this->config['app']['global_json_strings']['fields'] ?? '[]', true)['fields'] ?? [];
+            $formulas = json_decode($this->config['app']['global_json_strings']['formulas'] ?? '[]', true)['formulas'] ?? [];
             $defaults = $this->getDefaultSettings();
             
             // لاگ کردن اطلاعات برای دیباگ
@@ -530,538 +255,268 @@ class TransactionController extends AbstractController
             ]);
 
             // نمایش فرم ویرایش
-            $this->render('transactions/edit', [
+            $this->render('transactions/form', [ // FIX: تغییر به 'transactions/form'
                 'page_title'        => $pageTitle,
-                'transaction'       => $transaction,
-                'items'             => $items,
-                'assay_offices'     => $assayOffices,
-                'products'          => $products,
-                'contacts'          => $contacts,
-                'fields'            => $fieldsFromView,
-                'formulas'          => $formulas,
+                'is_edit_mode'      => true, // FIX: تنظیم حالت ویرایش
+                'form_action'       => $this->config['app']['base_url'] . '/app/transactions/save/' . $transactionId, // FIX: تنظیم اکشن فرم برای ویرایش
+                'transactionData'   => $transaction, // FIX: استفاده از transactionData به جای transaction
+                'transactionItemsData' => $items, // FIX: استفاده از transactionItemsData به جای items
+                'assayOfficesData'  => $assayOffices, // FIX: استفاده از assayOfficesData
+                'productsData'      => $products, // FIX: استفاده از productsData
+                'contactsData'      => $contacts, // FIX: استفاده از contactsData
+                'fieldsData'        => $fieldsFromView, // FIX: استفاده از fieldsData
+                'formulasData'      => $formulas, // FIX: استفاده از formulasData
                 'error_message'     => $errorMessage,
                 'success_message'   => $successMessage,
                 'loading_error'     => $loadingError,
                 'default_settings'  => $defaults,
-                'csrf_token'        => \App\Utils\Helper::generateCsrfToken(),
+                'csrf_token'        => Helper::generateCsrfToken(),
                 'baseUrl'           => $this->config['app']['base_url'],
-                'config'            => $this->config
+                'config'            => $this->config // برای دسترسی به app.debug در View
             ]);
             
         } catch (\Throwable $e) {
             $this->logger->error("Error loading transaction for edit form.", ['exception' => $e]);
             $loadingError = "خطا در بارگذاری اطلاعات معامله. " . ($this->config['app']['debug'] ? $e->getMessage() : '');
             
-            $this->render('transactions/edit', [
+            $this->render('transactions/form', [ // FIX: تغییر به 'transactions/form'
                 'page_title'    => $pageTitle,
-                'transaction'   => [],
-                'items'         => [],
-                'assay_offices' => [],
-                'products'      => [],
+                'is_edit_mode'  => true, // FIX: تنظیم حالت ویرایش
+                'form_action'   => $this->config['app']['base_url'] . '/app/transactions/save/' . $transactionId, // FIX: تنظیم اکشن فرم
+                'transactionData' => [], // FIX: داده خالی
+                'transactionItemsData' => [], // FIX: داده خالی
+                'assayOfficesData' => [], // FIX: داده خالی
+                'productsData' => [], // FIX: داده خالی
+                'contactsData' => [], // FIX: داده خالی
+                'fieldsData' => [], // FIX: داده خالی
+                'formulasData' => [], // FIX: داده خالی
                 'error_message' => $errorMessage ?: $loadingError,
-                'csrf_token'    => \App\Utils\Helper::generateCsrfToken(),
+                'csrf_token'    => Helper::generateCsrfToken(),
                 'baseUrl'       => $this->config['app']['base_url'],
                 'config'        => $this->config
             ]);
         }
     }
 
-
-    /**
-     * Processes the save request for a transaction (add or edit).
-     * Route: /app/transactions/save (POST for add)
-     * Route: /app/transactions/save/{id} (POST for edit)
-     */
     public function save(?int $transactionId = null): void
     {
         $this->requireLogin();
-
         if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-            $this->logger->warning("Save action called with invalid method.", ['method' => $_SERVER['REQUEST_METHOD']]);
-            $this->logger->debug("RAW POST DATA", ['post_data' => $_POST]);
-            $this->redirect('/app/transactions');
-            return;
+            $this->jsonResponse(['success' => false, 'message' => 'متد درخواست نامعتبر است.'], 405);
         }
-
-        // --- بارگذاری فرمول‌ها و فیلدها برای FormulaService (فقط یک‌بار و ابتدای متد) ---
-        list($fieldsFromView, $formulas) = $this->getFieldsAndFormulas();
-        if (!is_array($formulas)) $formulas = [];
-        $formulaService = new \App\Services\FormulaService($this->logger, $formulas, $fieldsFromView);
-        $defaults = $this->getDefaultSettings();
-
-        // لاگ کردن داده‌های خام دریافتی با نام‌های فیلد جدید
-        $this->logger->debug("Raw POST data received:", [
-            'post_data' => $_POST,
-            'is_edit' => ($transactionId !== null && $transactionId > 0)
-        ]);
-
-        // --- CSRF Token Validation ---
-        $submittedToken = $_POST['csrf_token'] ?? null;
-        if (!Helper::verifyCsrfToken($submittedToken)) {
-            $this->logger->error("CSRF token validation failed for transaction save.", ['tx_id' => $transactionId]);
-            $this->setSessionMessage(Helper::getMessageText('csrf_token_invalid'), 'danger', 'form_error');
-            $redirectUrlOnError = '/app/transactions/' . (($transactionId !== null && $transactionId > 0) ? 'edit/' . $transactionId : 'add');
-            $this->redirect($redirectUrlOnError);
-            return;
-        }
-
+        
         $isEditMode = ($transactionId !== null && $transactionId > 0);
         $postData = $_POST;
         
-        // نگاشت نام‌های فیلد قدیمی به جدید
-        if (isset($postData['items']) && is_array($postData['items'])) {
-            foreach ($postData['items'] as &$item) {
-                if (isset($item['weight_grams'])) {
-                    $item['item_weight_scale_melted'] = $item['weight_grams'];
-                    unset($item['weight_grams']);
-                }
-                if (isset($item['unit_price_rials'])) {
-                    $item['item_unit_price_melted'] = $item['unit_price_rials'];
-                    unset($item['unit_price_rials']);
-                }
-                // --- نگاشت فیلدهای آبشده (MELTED) ---
-                if (isset($item['item_carat_melted'])) {
-                    $item['carat'] = $item['item_carat_melted'];
-                }
-                if (isset($item['item_unit_price_melted'])) {
-                    $item['unit_price_rials'] = $item['item_unit_price_melted'];
-                }
-                if (isset($item['item_profit_percent_melted'])) {
-                    $item['profit_percent'] = $item['item_profit_percent_melted'];
-                }
-                if (isset($item['item_fee_percent_melted'])) {
-                    $item['fee_percent'] = $item['item_fee_percent_melted'];
-                }
-                // سایر فیلدهای مرتبط با آبشده را نیز به همین صورت map کن (مطابق با ساختار fields و formulas)
-            }
-            unset($item);
-        }
-
-        $sanitizedData = Helper::sanitizeNumbersRecursive($postData);
-
-        // --- نگاشت نام فیلدها بعد از sanitize و قبل از اعتبارسنجی (پویا و داینامیک) ---
-        if (isset($sanitizedData['items']) && is_array($sanitizedData['items'])) {
-            foreach ($sanitizedData['items'] as &$item) {
-                $group = $this->detectItemGroup($item);
-                $mapping = \App\Models\TransactionItem::mapFormFieldsToDbFields($group);
-                foreach ($mapping as $formField => $dbField) {
-                    if ($dbField && isset($item[$formField])) {
-                        $item[$dbField] = $item[$formField];
-                    }
-                }
-                // مقداردهی داینامیک: هر فیلدی که با item_ شروع می‌شود و در مدل وجود دارد، به همان نام در آیتم قرار بگیرد
-                foreach ($item as $key => $value) {
-                    if (strpos($key, 'item_') === 0 && !isset($item[$key])) {
-                        $item[$key] = $value;
-                    }
-                }
-            }
-            unset($item);
-        }
-
-        // ذخیره داده‌های اصلی در سشن قبل از اعتبارسنجی
-        $redirectUrlOnError = '/app/transactions/' . ($isEditMode ? 'edit/' . $transactionId : 'add');
-        $sessionFormDataKey = $isEditMode ? 'transaction_edit_data_' . $transactionId : 'transaction_add_data';
-        $_SESSION[$sessionFormDataKey] = $sanitizedData;
-
-        $errors = [];
-        $validatedTransactionData = [];
-        $validatedItemsData = [];
-        $calculatedGrandTotalRials = 0.0;
-        
-        // مقداردهی transaction_type قبل از استفاده در اعتبارسنجی آیتم‌ها
-        $validatedTransactionData['transaction_type'] = $sanitizedData['transaction_type'] ?? '';
-        $validatedTransactionData['delivery_status'] = $sanitizedData['delivery_status'] ?? '';
-        
-        // --- اعتبارسنجی همخوانی نوع معامله و وضعیت تحویل ---
-        if (!empty($validatedTransactionData['transaction_type']) && !empty($validatedTransactionData['delivery_status'])) {
-            $transactionType = $validatedTransactionData['transaction_type'];
-            $deliveryStatus = $validatedTransactionData['delivery_status'];
-            
-            // برای معامله خرید، وضعیت تحویل نباید "منتظر تحویل" باشد
-            if ($transactionType === 'buy' && $deliveryStatus === 'pending_delivery') {
-                $errors[] = Helper::getMessageText('transaction_type_delivery_mismatch', 'نوع معامله (خرید) با وضعیت تحویل (منتظر تحویل) همخوانی ندارد. وضعیت صحیح برای خرید، "منتظر دریافت" است.');
-            }
-            
-            // برای معامله فروش، وضعیت تحویل نباید "منتظر دریافت" باشد
-            if ($transactionType === 'sell' && $deliveryStatus === 'pending_receipt') {
-                $errors[] = Helper::getMessageText('transaction_type_delivery_mismatch', 'نوع معامله (فروش) با وضعیت تحویل (منتظر دریافت) همخوانی ندارد. وضعیت صحیح برای فروش، "منتظر تحویل" است.');
-            }
-        }
-        
-        $this->logger->debug("SANITIZED DATA", ['sanitized_data' => $sanitizedData]);
-        // بارگذاری محصولات برای اعتبارسنجی
-        $allProducts = $this->productRepository->findAll(['is_active' => true], true);
-        $productsById = [];
-        foreach ($allProducts as $p) {
-            $productsById[$p->id] = $p;
-        }
-        
-        if (empty($productsById)) {
-            $this->logger->warning("No active products found for transaction validation.");
-        }
-
-        // لاگ کردن محصولات بارگذاری شده
-        $this->logger->debug("Loaded products for validation:", [
-            'product_count' => count($productsById),
-            'product_ids' => array_keys($productsById)
-        ]);
-
-        // --- 3. اعتبارسنجی اقلام معامله ---
-        $submittedItems = $sanitizedData['items'] ?? [];
-        $this->logger->debug("Sanitized items for validation:", [
-            'items' => $submittedItems
-        ]);
-
-        if (empty($errors) && (!is_array($submittedItems) || count($submittedItems) === 0)) {
-            $errors[] = Helper::getMessageText('transaction_items_required');
-        }
-
-        if (empty($errors)) { 
-            // اطمینان از مقداردهی صحیح formulas قبل از حلقه آیتم‌ها
-            if (!isset($formulas) || !is_array($formulas)) {
-                list($fieldsFromView, $formulas) = $this->getFieldsAndFormulas();
-                if (!is_array($formulas)) $formulas = [];
-            }
-            foreach ($submittedItems as $index => $itemData) {
-                $this->logger->debug("Processing item #{$index}:", [
-                    'item_data' => $itemData
-                ]);
-                $itemErrors = [];
-                $itemIndexLabel = "قلم #" . ($index + 1); 
-                // تشخیص گروه کالا
-                $group = $this->detectItemGroup($itemData);
-                // اعتبارسنجی و محاسبات (در صورت نیاز)
-                // ...
-                // مپینگ مرکزی و دقیق
-                $dbItem = \App\Models\TransactionItem::mapFormToDb($itemData, $group);
-                // مقداردهی فیلدهای سیستمی (در صورت نیاز)
-                $dbItem['id'] = isset($itemData['id']) ? (int)$itemData['id'] : null;
-                $validatedItemsData[] = $dbItem;
-            }
-        }
-
-        // --- محاسبه و مقداردهی همه فیلدهای محاسباتی آیتم‌ها بر اساس فرمول‌های هر گروه ---
-        foreach ($validatedItemsData as $idx => &$item) {
-            $group = $this->detectItemGroup($item);
-            $product = $productsById[$item['product_id']] ?? null;
-            if ($product) {
-                $groupFormulas = array_filter($formulas, function($f) use ($group) {
-                    return isset($f['group']) && strtoupper($f['group']) === strtoupper($group) && isset($f['output_field']);
-                });
-                foreach ($groupFormulas as $formula) {
-                    $outputField = $formula['output_field'];
-                    $fieldsNeeded = $formula['fields'] ?? [];
-                    $inputValues = [];
-                    foreach ($fieldsNeeded as $fieldName) {
-                        $inputValues[$fieldName] = isset($item[$fieldName]) && is_numeric($item[$fieldName]) ? $item[$fieldName] : 0;
-                    }
-                    // مقداردهی داینامیک مالیات و ارزش افزوده از مدل محصول
-                    $inputValues['product_tax_enabled'] = isset($product->tax_enabled) ? (int)$product->tax_enabled : 0;
-                    $inputValues['product_tax_rate'] = isset($product->tax_rate) ? (float)$product->tax_rate : 0;
-                    $inputValues['product_vat_enabled'] = isset($product->vat_enabled) ? (int)$product->vat_enabled : 0;
-                    $inputValues['product_vat_rate'] = isset($product->vat_rate) ? (float)$product->vat_rate : 0;
-                    if (in_array('mazaneh_price', $fieldsNeeded) && !isset($inputValues['mazaneh_price'])) {
-                        $inputValues['mazaneh_price'] = isset($sanitizedData['mazaneh_price']) ? $sanitizedData['mazaneh_price'] : 0;
-                    }
-                    $result = $formulaService->calculate($formula['name'], $inputValues);
-                    $item[$outputField] = $result ?? 0;
-                }
-            }
-        }
-        unset($item);
-        // --- محاسبه مقادیر محاسباتی کلی تراکنش با FormulaService ---
-        $taxRate = (float)($this->settingsRepository->get('tax_rate', 9));
-        $vatRate = (float)($this->settingsRepository->get('vat_rate', 7));
-        $transactionSummary = $formulaService->calculateTransactionSummary($validatedItemsData, $sanitizedData, $productsById, $defaults, [
-            'tax_rate' => $taxRate,
-            'vat_rate' => $vatRate
-        ]);
-        foreach ($transactionSummary as $field => $value) {
-            $postData[$field] = $value;
-        } 
-
-        // --- 4. Handle Validation Errors ---
-        if (!empty($errors)) {
-            $isAjax = isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
-            if ($isAjax) {
-                header('Content-Type: application/json');
-                echo json_encode(['success' => false, 'errors' => $errors]);
-                exit;
-            }
-            // حالت عادی (غیر AJAX):
-            $this->logger->warning("Transaction save validation failed.", ['errors' => $errors, 'tx_id' => $transactionId, 'is_edit' => $isEditMode]);
-            $errorMessageText = Helper::getMessageText('validation_errors') . '<br>' . implode('<br>', array_unique($errors));
-            $this->setSessionMessage($errorMessageText, 'danger', 'form_error');
-            $_SESSION[$sessionFormDataKey] = $sanitizedData;
-            $this->logger->debug("Saving form data to session for error recovery", [
-                'session_key' => $sessionFormDataKey,
-                'data_sample' => array_slice($sanitizedData, 0, 3)
-            ]);
-            $this->redirect($redirectUrlOnError);
-            return;
-        }
-
-        // --- 5. Database Operations ---
         try {
+            if (!Helper::verifyCsrfToken($postData['csrf_token'] ?? null)) {
+                throw new Exception('خطای امنیتی: توکن نامعتبر است.');
+            }
+
             $this->db->beginTransaction();
-            $this->logger->debug("Starting transaction save process.", ['tx_id' => $transactionId, 'is_edit' => $isEditMode, 'item_count' => count($validatedItemsData)]);
+            $mainTxData = $this->validateAndPrepareMainTxData($postData);
+            if ($isEditMode) $mainTxData['id'] = $transactionId;
 
-            // محاسبه جمع مبلغ آیتم‌ها
-            $totalItemsValue = 0.0;
-            $calculatedWeight = 0.0;
-            foreach ($validatedItemsData as $item) {
-                $totalItemsValue += floatval($item['total_value_rials'] ?? 0);
-                $calculatedWeight += floatval($item['weight_grams'] ?? 0);
-            }
-            // تبدیل مظنه به عدد خالص
-            $mazanehPrice = isset($postData['mazaneh_price']) ? Helper::sanitizeFormattedNumber($postData['mazaneh_price']) : 0;
-            // مقداردهی فیلدهای محاسباتی دقیق جدول transactions
-            $postData['total_items_value_rials'] = $totalItemsValue;
-            $postData['total_value_rials'] = $totalItemsValue;
-            $postData['mazaneh_price'] = $mazanehPrice;
-            $postData['calculated_weight_grams'] = $calculatedWeight;
-            $postData['price_per_reference_gram'] = $postData['price_per_reference_gram'] ?? 0;
-            $postData['usd_rate_ref'] = $postData['usd_rate_ref'] ?? 0;
-            $postData['total_profit_wage_commission_rials'] = $postData['total_profit_wage_commission_rials'] ?? 0;
-            $postData['total_general_tax_rials'] = $postData['total_general_tax_rials'] ?? 0;
-            $postData['total_before_vat_rials'] = $postData['total_before_vat_rials'] ?? 0;
-            $postData['total_vat_rials'] = $postData['total_vat_rials'] ?? 0;
-            $postData['final_payable_amount_rials'] = $postData['final_payable_amount_rials'] ?? 0;
-            // مپینگ مرکزی و دقیق داده‌های فرم تراکنش
-            $mainTransactionSaveData = \App\Models\Transaction::mapFormToDb($postData);
-            $mainTransactionSaveData['total_items_value_rials'] = $totalItemsValue;
-            // اضافه کردن فیلدهای audit
-            $userId = $_SESSION['user_id'] ?? null;
-            $now = date('Y-m-d H:i:s');
-            if ($isEditMode) {
-                $mainTransactionSaveData['id'] = $transactionId;
-                $mainTransactionSaveData['updated_by_user_id'] = $userId;
-                $mainTransactionSaveData['updated_at'] = $now;
-            } else {
-                $mainTransactionSaveData['created_by_user_id'] = $userId;
-                $mainTransactionSaveData['created_at'] = $now;
-                $mainTransactionSaveData['updated_by_user_id'] = $userId;
-                $mainTransactionSaveData['updated_at'] = $now;
-            }
-            // بعد از ذخیره تراکنش، مقدار transaction_id را به validatedItemsData اضافه کن
-            $finalTransactionId = $isEditMode ? $transactionId : $savedTransactionId;
-            foreach ($validatedItemsData as &$item) {
-                $item['transaction_id'] = $finalTransactionId;
-            }
-            unset($item);
+            $submittedItems = $postData['items'] ?? [];
+            if (empty($submittedItems)) throw new Exception('حداقل یک قلم معامله باید وارد شود.');
+            
+            $validatedItems = [];
+            $allProducts = $this->productRepository->getAllActiveWithCategory();
+            $productsById = [];
+            foreach ($allProducts as $p) { $productsById[$p->id] = $p; }
 
-            $existingDbItemIds = [];
+            foreach ($submittedItems as $index => $itemData) {
+                if(empty($itemData['product_id'])) continue; 
+                $product = $productsById[$itemData['product_id']] ?? null;
+                if (!$product) throw new Exception("محصول انتخاب شده در ردیف " . ($index + 1) . " معتبر نیست.");
+                
+                $normalizedItem = $this->normalizeItemData($itemData, $product);
+                $recalculatedItem = $this->recalculateItemWithFormulas($normalizedItem, $product, (float)($mainTxData['mazaneh_price'] ?? 0));
+                
+                $itemModel = new TransactionItem($recalculatedItem);
+                $itemModel->id = isset($itemData['id']) && (int)$itemData['id'] > 0 ? (int)$itemData['id'] : null;
+                $validatedItems[] = $itemModel;
+            }
+            
+            if(empty($validatedItems)) throw new Exception('هیچ قلم معامله معتبری برای ذخیره وجود ندارد.');
+
+            // FIX: تبدیل اشیاء TransactionItem به آرایه قبل از ارسال به FormulaService
+            $itemsAsArrays = array_map(fn($itemModel) => $itemModel->toArray(), $validatedItems);
+
+            // FIX: ارسال آرایه آیتم‌ها به FormulaService
+            $summary = $this->formulaService->calculateTransactionSummary(
+                $itemsAsArrays, // استفاده از آرایه آیتم‌ها
+                $mainTxData,
+                $productsById,
+                $this->getDefaultSettings(), // Pass default settings
+                [
+                    'tax_rate' => (float)($this->settingsRepository->getSetting('tax_rate') ?? 0), // FIX: استفاده از getSetting
+                    'vat_rate' => (float)($this->settingsRepository->getSetting('vat_rate') ?? 0) // FIX: استفاده از getSetting
+                ]
+            );
+            $mainTxData = array_merge($mainTxData, $summary);
+            
+            $finalTransactionId = $this->transactionRepository->save($mainTxData);
+
             if ($isEditMode) {
                 $this->inventoryLedgerRepository->deleteByTransactionId($transactionId);
-                $existingDbItemIds = $this->transactionItemRepository->getItemIdsByTransactionId($transactionId);
+                $this->transactionItemRepository->deleteByTransactionId($transactionId);
             }
 
-            $savedTransactionId = $this->transactionRepository->save($mainTransactionSaveData);
-            if (!$savedTransactionId && !$isEditMode) { 
-                throw new Exception('خطا در ذخیره اطلاعات پایه معامله (ID دریافت نشد).');
-            }
-            $finalTransactionId = $isEditMode ? $transactionId : $savedTransactionId;
+            foreach ($validatedItems as $item) { // $item در اینجا یک شیء TransactionItem است
+                $item->transaction_id = $finalTransactionId;
+                $savedItemId = $this->transactionItemRepository->save($item);
 
-            $submittedItemIdsWithData = [];
-            foreach ($validatedItemsData as $itemData) {
-                if (!empty($itemData['id'])) {
-                    $submittedItemIdsWithData[$itemData['id']] = $itemData; 
-                }
-            }
-            $submittedExistingItemIds = array_keys($submittedItemIdsWithData);
-
-            if ($isEditMode) {
-                $itemsToDelete = array_diff($existingDbItemIds, $submittedExistingItemIds);
-                foreach ($itemsToDelete as $itemIdToDelete) {
-                    $this->logger->debug('Deleting transaction item.', ['tx_id' => $finalTransactionId, 'item_id' => $itemIdToDelete]);
-                    $this->transactionItemRepository->delete($itemIdToDelete);
-                }
-            }
-
-            // لاگ نهایی داده تراکنش قبل از ذخیره
-            $this->logger->debug('FINAL TRANSACTION DATA FOR DB', ['mainTransactionSaveData' => $mainTransactionSaveData]);
-            foreach ($validatedItemsData as $itemToSave) {
-                $allowedFields = \App\Models\TransactionItem::getAllowedFields();
-                $itemSaveData = array_intersect_key($itemToSave, array_flip($allowedFields));
-                $itemSaveData['transaction_id'] = $finalTransactionId;
-                // لاگ نهایی داده آیتم قبل از ذخیره
-                $this->logger->debug('FINAL ITEM DATA FOR DB', ['itemSaveData' => $itemSaveData]);
-                $itemModel = new \App\Models\TransactionItem($itemSaveData);
-                $savedItemId = $this->transactionItemRepository->save($itemModel);
-                if (!$savedItemId) {
-                    $this->logger->error("خطا در ذخیره آیتم تراکنش", ['item_data' => $itemSaveData]);
-                    throw new Exception("خطا در ذخیره آیتم تراکنش برای محصول: " . ($itemSaveData['product_id'] ?? 'نامشخص'));
-                }
-                // مقداردهی مالیات و ارزش افزوده فقط اگر فعال باشد
-                if ($product && !empty($product->tax_enabled)) {
-                    $group = strtolower($product->category->base_category ?? '');
-                    $itemModel->general_tax = $itemData['item_general_tax_' . $group] ?? 0;
-                    $itemModel->vat = $itemData['item_vat_' . $group] ?? 0;
-                } else {
-                    $itemModel->general_tax = 0;
-                    $itemModel->vat = 0;
-                }
+                // FIX: اطمینان از ارسال آرایه به recordChange
+                $this->inventoryLedgerRepository->recordChange([
+                    'product_id' => $item->product_id,
+                    'transaction_id' => $finalTransactionId,
+                    'transaction_item_id' => $savedItemId,
+                    'event_date' => $mainTxData['transaction_date'],
+                    'change_quantity' => ($mainTxData['transaction_type'] === 'buy') ? ($item->quantity ?? 0) : -($item->quantity ?? 0),
+                    'change_weight_grams' => ($mainTxData['transaction_type'] === 'buy') ? ($item->weight_grams ?? 0.0) : -($item->weight_grams ?? 0.0),
+                    'event_type' => ($mainTxData['transaction_type'] === 'buy') ? 'PURCHASE' : 'SALE',
+                    'notes' => "Item from Transaction #" . $finalTransactionId,
+                ]);
             }
 
             $this->db->commit();
-            $this->logger->info("Transaction and items saved successfully, DB transaction committed.", ['transaction_id' => $finalTransactionId, 'is_edit' => $isEditMode]);
-
-            $actionWord = $isEditMode ? Helper::getMessageText('edit') : Helper::getMessageText('add');
-            $messageKey = $isEditMode ? 'transaction_update_success' : 'transaction_create_success';
-            $successMsg = Helper::getMessageText($messageKey);
-            $this->setSessionMessage($successMsg, 'success', 'transaction_success');
-
-            Helper::logActivity(
-                $this->db,
-                "Transaction {$actionWord}: ID {$finalTransactionId}",
-                $isEditMode ? 'TRANSACTION_UPDATED' : 'TRANSACTION_CREATED',
-                'INFO',
-                ['transaction_id' => $finalTransactionId, 'items_count' => count($validatedItemsData)]
-            );
-
-            // --- پاسخ‌دهی پویا بر اساس نوع درخواست ---
-            $isAjax = isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
-            if ($isAjax) {
-                header('Content-Type: application/json');
-                echo json_encode(['success' => true, 'message' => $successMsg, 'transaction_id' => $finalTransactionId]);
-                exit;
-            }
-
-            $this->redirect('/app/transactions');
-            return; 
-
-        } catch (Throwable $e) {
-            if ($this->db->inTransaction()) {
-                $this->logger->error("Rolling back DB transaction due to error during save.", ['tx_id' => $transactionId]);
-                $this->db->rollBack();
-            }
-            $this->logger->error("Critical error saving transaction.", [
-                'tx_id' => $transactionId,
-                'is_edit' => $isEditMode,
-                'exception_type' => get_class($e),
-                'exception_message' => $e->getMessage(),
-                 'trace' => $e->getTraceAsString() 
+            $actionWord = $isEditMode ? 'ویرایش' : 'ثبت';
+            $this->setSessionMessage("معامله با موفقیت {$actionWord} شد.", 'success');
+            
+            $this->jsonResponse([
+                'success' => true,
+                'message' => "معامله با موفقیت {$actionWord} شد.",
+                'redirect_url' => $this->config['app']['base_url'] . '/app/transactions'
             ]);
 
-            $detailedError = $this->config['app']['debug'] ? (" جزئیات فنی: " . Helper::escapeHtml($e->getMessage())) : '';
-            $userMessage = Helper::getMessageText('transaction_save_error') . $detailedError; // Use key for base message
-            if ($e instanceof PDOException && $e->getCode() == '23000') {
-                $userMessage = Helper::getMessageText('database_constraint_error'); // Use specific key for constraint error
-            }
-
-            // --- پاسخ‌دهی پویا بر اساس نوع درخواست ---
-            $isAjax = isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
-            if ($isAjax) {
-                header('Content-Type: application/json');
-                echo json_encode(['success' => false, 'message' => $userMessage]);
-                exit;
-            }
-
-            $this->setSessionMessage($userMessage, 'danger', 'form_error');
-            $_SESSION[$sessionFormDataKey] = $sanitizedData; 
-            $this->redirect($redirectUrlOnError);
-            return; 
+        } catch (Throwable $e) {
+            if ($this->db->inTransaction()) $this->db->rollBack();
+            $this->logger->error("Critical error saving transaction.", ['exception' => $e->getMessage()]);
+            $this->jsonResponse(['success' => false, 'message' => 'خطا در ذخیره معامله: ' . $e->getMessage()], 500);
         }
     }
 
+    private function validateAndPrepareMainTxData(array $postData): array {
+        $data = [];
+        $data['transaction_type'] = $postData['transaction_type'] ?? null;
+        if (!in_array($data['transaction_type'], ['buy', 'sell'])) throw new Exception('نوع معامله نامعتبر است.');
+        $data['counterparty_contact_id'] = filter_var($postData['counterparty_contact_id'] ?? null, FILTER_VALIDATE_INT) ?: null;
+        if (empty($data['counterparty_contact_id'])) throw new Exception('انتخاب طرف حساب الزامی است.');
+        // استفاده از Helper::parseJalaliDatetimeToSql برای تبدیل تاریخ
+        $data['transaction_date'] = Helper::parseJalaliDatetimeToSql($postData['transaction_date'] ?? '');
+        if (empty($data['transaction_date'])) throw new Exception('تاریخ معامله نامعتبر است.');
+        $data['delivery_status'] = $postData['delivery_status'] ?? 'completed';
+        if ($data['transaction_type'] === 'buy' && $data['delivery_status'] === 'pending_delivery') throw new Exception('وضعیت تحویل برای معامله خرید نامعتبر است.');
+        if ($data['transaction_type'] === 'sell' && $data['delivery_status'] === 'pending_receipt') throw new Exception('وضعیت تحویل برای معامله فروش نامعتبر است.');
+        // استفاده از Helper::sanitizeFormattedNumber برای مظنه
+        $data['mazaneh_price'] = (float)Helper::sanitizeFormattedNumber($postData['mazaneh_price'] ?? '0');
+        $data['notes'] = trim($postData['notes'] ?? '');
+        $data['created_by_user_id'] = $_SESSION['user_id'] ?? null;
+        return $data;
+    }
+    
+    private function normalizeItemData(array $itemData, object $product): array {
+        // اطمینان حاصل کنید که product->category->base_category همیشه موجود است
+        $group = strtolower($product->category->base_category ?? '');
+        $normalized = ['product_id' => (int)$itemData['product_id']];
+        $normalized['description'] = $itemData["description"] ?? ($itemData["item_description_{$group}"] ?? null);
+        
+        // نگاشت فیلدهای فرم به فیلدهای دیتابیس
+        // این نگاشت باید جامع باشد و تمام فیلدهای ممکن را پوشش دهد.
+        // از TransactionItem::mapFormFieldsToDbFields برای این نگاشت استفاده کنید.
+        $fieldMapping = \App\Models\TransactionItem::mapFormFieldsToDbFields(strtoupper($group));
 
-    /**
-     * Processes the delete request for a transaction. Reverts inventory if completed.
-     * Route: /app/transactions/delete/{id} (POST)
-     *
-     * @param int $transactionId The ID of the transaction to delete.
-     */
-    public function delete(int $transactionId): void
-    {
+        foreach ($fieldMapping as $formField => $dbField) {
+            if (isset($itemData[$formField])) {
+                // از sanitizeFormattedNumber برای فیلدهای عددی استفاده کنید
+                $value = in_array($dbField, ['quantity', 'weight_grams', 'carat', 'unit_price_rials', 'ajrat_rials', 'profit_percent', 'fee_percent', 'manufacturing_fee_rate', 'total_value_rials']) // FIX: total_value_rials اضافه شد
+                    ? Helper::sanitizeFormattedNumber($itemData[$formField])
+                    : $itemData[$formField];
+                
+                if ($value !== '' && $value !== null) {
+                    // تبدیل به نوع صحیح
+                    if (in_array($dbField, ['quantity', 'carat', 'assay_office_id', 'coin_year'])) {
+                        $normalized[$dbField] = (int)$value;
+                    } elseif (in_array($dbField, ['weight_grams', 'unit_price_rials', 'ajrat_rials', 'profit_percent', 'fee_percent', 'manufacturing_fee_rate', 'total_value_rials'])) { // FIX: total_value_rials اضافه شد
+                        $normalized[$dbField] = (float)$value;
+                    } else {
+                        $normalized[$dbField] = $value;
+                    }
+                } else {
+                    $normalized[$dbField] = null; // اگر خالی بود، null ذخیره شود
+                }
+            }
+        }
+        
+        // فیلدهای خاصی که ممکن است در mapFormFieldsToDbFields نباشند اما در TransactionItem Model هستند
+        // و باید از itemData مستقیماً کپی شوند (مثلاً اگر نام فیلد در فرم با نام ستون در DB یکی است)
+        $directCopyFields = ['tag_number', 'seal_name', 'is_bank_coin', 'workshop_name', 'stone_weight_grams'];
+        foreach ($directCopyFields as $field) {
+            // FIX: بررسی کنید که آیا فیلد در itemData وجود دارد و خالی نیست
+            if (isset($itemData[$field]) && ($itemData[$field] !== '' || $itemData[$field] !== null)) {
+                $normalized[$field] = $itemData[$field];
+            } else {
+                $normalized[$field] = null; // اگر خالی بود، null ذخیره شود
+            }
+        }
+
+        return $normalized;
+    }
+    
+    private function recalculateItemWithFormulas(array $item, object $product, float $mazanehPrice): array {
+        $group = strtolower($product->category->base_category ?? '');
+        $inputValues = $item;
+        $inputValues['mazaneh_price'] = $mazanehPrice;
+        
+        // دریافت نرخ مالیات و ارزش افزوده از تنظیمات کلی (SettingsRepository)
+        $taxRate = (float)($this->settingsRepository->getSetting('tax_rate') ?? 0);
+        $vatRate = (float)($this->settingsRepository->getSetting('vat_rate') ?? 0);
+
+        // اضافه کردن اطلاعات مالیات و ارزش افزوده محصول به inputValues
+        $inputValues['product_tax_enabled'] = (int)($product->tax_enabled ?? 0);
+        $inputValues['product_tax_rate'] = (float)($product->tax_rate ?? $taxRate); // نرخ مالیات محصول یا نرخ پیش‌فرض
+        $inputValues['product_vat_enabled'] = (int)($product->vat_enabled ?? 0);
+        $inputValues['product_vat_rate'] = (float)($product->vat_rate ?? $vatRate); // نرخ ارزش افزوده محصول یا نرخ پیش‌فرض
+
+        // FIX: استفاده از متد جدید getFormulasByGroup() در FormulaService
+        $itemFormulas = $this->formulaService->getFormulasByGroup($group);
+        foreach ($itemFormulas as $formula) {
+            if (isset($formula['output_field'])) {
+                $calculatedValue = $this->formulaService->calculate($formula['name'], $inputValues);
+                // اطمینان از اینکه مقدار محاسبه شده عددی است
+                $item[$formula['output_field']] = is_numeric($calculatedValue) ? (float)$calculatedValue : 0.0;
+                // به‌روزرسانی inputValues برای استفاده در فرمول‌های بعدی
+                $inputValues[$formula['output_field']] = $item[$formula['output_field']];
+            }
+        }
+
+        return $item;
+    }
+    
+    public function delete(int $transactionId): void {
         $this->requireLogin();
-
-        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-            $this->logger->warning("Delete action called with invalid method.", ['method' => $_SERVER['REQUEST_METHOD']]);
-            $this->redirect('/app/transactions');
-            return;
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !Helper::verifyCsrfToken($_POST['csrf_token'] ?? '')) {
+             $this->setSessionMessage('درخواست نامعتبر است.', 'danger');
+             $this->redirect('/app/transactions');
+             return; // اضافه شده
         }
-
-        // --- CSRF Token Validation ---
-        $submittedToken = $_POST['csrf_token'] ?? null; // Assuming token is sent in POST
-        if (!Helper::verifyCsrfToken($submittedToken)) {
-            $this->logger->error("CSRF token validation failed for transaction delete.", ['tx_id' => $transactionId]);
-            $this->setSessionMessage(Helper::getMessageText('csrf_token_invalid'), 'danger', 'transaction_error');
-            $this->redirect('/app/transactions');
-            return;
-        }
-        // Helper::regenerateCsrfToken(); // Optional
-
-        if ($transactionId <= 0) {
-            $this->setSessionMessage(Helper::getMessageText('invalid_transaction_id', 'شناسه معامله نامعتبر است.'), 'danger', 'transaction_error'); // Added specific key or fallback
-            $this->redirect('/app/transactions');
-            return;
-        }
-        $this->logger->info("Attempting delete.", ['transaction_id' => $transactionId]);
-
         try {
             $this->db->beginTransaction();
-
-            $txToDelete = $this->transactionRepository->findByIdWithItems($transactionId); // Fetch full transaction to revert inventory
-            if (!$txToDelete) {
-                $this->db->rollBack();
-                $this->setSessionMessage(Helper::getMessageText('transaction_not_found'), 'warning', 'transaction_error'); // Using 'warning' as it's not a hard error
-                $this->redirect('/app/transactions');
-                return;
-            }
-
-            // --- Revert Inventory Changes ---
-            // This requires knowing the original items and their quantities/weights.
-            // The inventory ledger should ideally handle reversals based on transaction_id.
-            // For simplicity, let's assume we delete ledger entries for this transaction.
-            // A more robust system would create "reversal" ledger entries.
+            // FIX: ابتدا آیتم‌ها و سپس دفتر موجودی حذف شوند (ترتیب مهم است)
             $this->inventoryLedgerRepository->deleteByTransactionId($transactionId);
-            $this->logger->info("Inventory ledger entries deleted for transaction before actual delete.", ['tx_id' => $transactionId]);
-            
-
-            // Delete the transaction items first due to FK constraints
             $this->transactionItemRepository->deleteByTransactionId($transactionId);
-            $this->logger->info("Transaction items deleted.", ['tx_id' => $transactionId]);
-
-            // Then delete the main transaction record
-            $isDeleted = $this->transactionRepository->delete($transactionId);
-
-
-            if ($isDeleted) {
-                $this->db->commit();
-                $message = Helper::getMessageText('transaction_delete_success');
-                Helper::logActivity($this->db, "Transaction deleted: ID {$transactionId}", 'TRANSACTION_DELETED', 'INFO', ['transaction_id' => $transactionId]);
-                $this->setSessionMessage($message, 'success', 'transaction_success');
-                $this->logger->info("Transaction deleted successfully.", ['tx_id' => $transactionId]);
-            } else {
-                $this->db->rollBack();
-                $this->setSessionMessage(Helper::getMessageText('transaction_delete_error'), 'danger', 'transaction_error');
-                $this->logger->warning("Transaction delete failed (not found or not deleted by repo).", ['tx_id' => $transactionId]);
-            }
-
+            $this->transactionRepository->delete($transactionId);
+            $this->db->commit();
+            $this->setSessionMessage('معامله با موفقیت حذف شد.', 'success');
         } catch (Throwable $e) {
-            if ($this->db->inTransaction()) {
-                $this->db->rollBack();
-            }
+            if ($this->db->inTransaction()) $this->db->rollBack();
             $this->logger->error("Error deleting transaction.", ['tx_id' => $transactionId, 'exception' => $e]);
-            $errorMessage = 'خطا در حذف معامله.';
-            if ($e instanceof PDOException && $e->getCode() == '23000') {
-                $errorMessage = "امکان حذف نیست: به پرداخت‌ها یا سایر رکوردها مرتبط است.";
-            } elseif ($this->config['app']['debug']) {
-                $errorMessage .= " جزئیات: " . Helper::escapeHtml($e->getMessage());
-            }
-            $this->setSessionMessage($errorMessage, 'danger', 'transaction_error');
+            $this->setSessionMessage('خطا در حذف معامله: ' . $e->getMessage(), 'danger'); // اضافه شده
         }
         $this->redirect('/app/transactions');
     }
 
-    /**
-     * Completes the delivery or receipt process for a transaction using DeliveryService.
-     * Route: /app/transactions/complete-delivery/{id}/{action:receipt|delivery} (POST)
-     *
-     * @param int $transactionId The ID of the transaction.
-     * @param string $actionType 'receipt' or 'delivery'.
-     */
     public function completeDeliveryAction(int $transactionId, string $actionType): void
     {
         $this->requireLogin();
@@ -1106,32 +561,75 @@ class TransactionController extends AbstractController
         $this->redirect('/app/transactions');
     }
 
-    /**
-     * تشخیص گروه کالا برای mapping پویا
-     * @param array $item آیتم تراکنش
-     * @return string گروه کالا (MELTED, MANUFACTURED, COIN, GOLDBULLION, JEWELRY)
-     */
-    private function detectItemGroup(array $item): string
-    {
-        // اگر category_code مستقیماً در آیتم باشد
-        if (!empty($item['category_code'])) {
-            return strtoupper($item['category_code']);
-        }
-        // اگر product_id وجود دارد، گروه را از محصول پیدا کن
-        if (!empty($item['product_id']) && isset($this->productRepository)) {
-            $product = $this->productRepository->findById((int)$item['product_id']);
-            if ($product && !empty($product->category) && !empty($product->category->code)) {
-                return strtoupper($product->category->code);
-            }
-        }
-        // تشخیص بر اساس وجود فیلدهای خاص هر گروه
-        if (isset($item['item_carat_melted']) || isset($item['item_weight_scale_melted'])) return 'MELTED';
-        if (isset($item['item_carat_manufactured']) || isset($item['item_weight_scale_manufactured'])) return 'MANUFACTURED';
-        if (isset($item['item_quantity_coin']) || isset($item['item_unit_price_coin'])) return 'COIN';
-        if (isset($item['item_carat_goldbullion']) || isset($item['item_weight_scale_goldbullion'])) return 'GOLDBULLION';
-        if (isset($item['item_weight_carat_jewelry']) || isset($item['item_unit_price_jewelry'])) return 'JEWELRY';
-        // پیش‌فرض
-        return 'MELTED';
-    }
+    // FIX: متد generatePaginationDataLocal به Helper منتقل شده است.
+    // این متد از اینجا حذف می‌شود.
+    // private function generatePaginationDataLocal(...) { ... }
 
-} // End TransactionController class
+    // FIX: متد getDeliveryStatusOptionsLocal به Helper منتقل شده است.
+    // این متد از اینجا حذف می‌شود.
+    // private function getDeliveryStatusOptionsLocal(...) { ... }
+
+    private function getDefaultSettings(): array
+    {
+        // دریافت مقادیر پیش‌فرض از SettingsRepository
+        return [
+            'melted_profit_percentage' => (float)($this->settingsRepository->getSetting('melted_profit_percentage') ?? 0),
+            'melted_fee_percentage' => (float)($this->settingsRepository->getSetting('melted_fee_percentage') ?? 0),
+            'manufactured_profit_percentage' => (float)($this->settingsRepository->getSetting('manufactured_profit_percentage') ?? 7),
+            'bullion_profit_percentage' => (float)($this->settingsRepository->getSetting('bullion_profit_percentage') ?? 0),
+            'bullion_fee_percentage' => (float)($this->settingsRepository->getSetting('bullion_fee_percentage') ?? 0),
+            // نرخ مالیات و ارزش افزوده باید از تنظیمات عمومی (settingsRepository) خوانده شوند
+            'tax_rate' => (float)($this->settingsRepository->getSetting('tax_rate') ?? 0),
+            'vat_rate' => (float)($this->settingsRepository->getSetting('vat_rate') ?? 0),
+        ];
+    }
+    
+    // FIX: متد getFieldsAndFormulas از اینجا حذف می‌شود.
+    // این اطلاعات از global_json_strings در کنترلر اصلی (index.php) لود و تزریق می‌شوند.
+    // private function getFieldsAndFormulas(): array { ... }
+
+    // FIX: متد getGroupedProducts از اینجا حذف می‌شود.
+    // این منطق باید در ProductRepository یا یک ProductService باشد.
+    // private function getGroupedProducts(): array { ... }
+
+    private function formatTransactionForListView(array &$tx): void
+    {
+        // استفاده از Helper::getMessageText برای ترجمه
+        $tx['transaction_type_farsi'] = match ($tx['transaction_type'] ?? '') {
+            'buy' => Helper::getMessageText('buy', 'خرید'),
+            'sell' => Helper::getMessageText('sell', 'فروش'),
+            default => '؟'
+        };
+        // FIX: استفاده از total_items_value_rials برای نمایش مبلغ کل در لیست
+        $tx['total_value_rials_formatted'] = Helper::formatRial($tx['total_items_value_rials'] ?? 0);
+        // تبدیل تاریخ میلادی به شمسی با Jalalian
+        if (!empty($tx['transaction_date'])) {
+            try {
+                $dt = new \DateTime($tx['transaction_date']);
+                $jalali = Jalalian::fromDateTime($dt);
+                $tx['transaction_date_persian'] = $jalali->format('Y/m/d H:i');
+            } catch (\Exception $e) {
+                // لاگ خطا در صورت عدم توانایی در تبدیل تاریخ
+                $this->logger->warning("Failed to format transaction date to Persian.", ['date' => $tx['transaction_date'], 'exception' => $e->getMessage()]);
+                $tx['transaction_date_persian'] = '-';
+            }
+        } else {
+            $tx['transaction_date_persian'] = '-';
+        }
+        $tx['counterparty_name'] = Helper::escapeHtml($tx['counterparty_name'] ?? '[نامشخص]');
+        // استفاده از Helper برای ترجمه و کلاس وضعیت
+        $tx['delivery_status_farsi'] = Helper::translateDeliveryStatus($tx['delivery_status'] ?? '');
+        $tx['delivery_status_class'] = Helper::getDeliveryStatusClass($tx['delivery_status'] ?? '');
+        $tx['can_complete_delivery'] = ($tx['delivery_status'] ?? '') === 'pending_delivery';
+        $tx['can_complete_receipt'] = ($tx['delivery_status'] ?? '') === 'pending_receipt';
+        $tx['notes_tooltip'] = Helper::escapeHtml($tx['notes'] ?? '');
+        $tx['notes_short'] = mb_substr($tx['notes'] ?? '', 0, 30, 'UTF-8') . (mb_strlen($tx['notes'] ?? '') > 30 ? '...' : '');
+        if (isset($tx['gold_product_type']) && str_starts_with($tx['gold_product_type'], 'coin_')) {
+            $tx['base_price_formatted'] = Helper::formatRial($tx['unit_price'] ?? 0);
+        } else {
+            $mazanehPrice = $tx['mazaneh_price'] ?? 0;
+            $tx['base_price_formatted'] = Helper::formatRial($mazanehPrice);
+            $tx['mazaneh_price_formatted'] = Helper::formatRial($mazanehPrice);
+        }
+    }
+}

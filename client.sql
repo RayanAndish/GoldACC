@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Host: 127.0.0.1
--- Generation Time: May 31, 2025 at 12:15 PM
+-- Generation Time: Jun 17, 2025 at 08:48 PM
 -- Server version: 10.4.32-MariaDB
 -- PHP Version: 8.3.20
 
@@ -73,7 +73,8 @@ CREATE TABLE `assay_offices` (
 --
 
 INSERT INTO `assay_offices` (`id`, `name`, `phone`, `address`, `created_at`, `updated_at`) VALUES
-(157, 'ری گیری احمدی', '88994466', 'تهران بازار', '2025-05-12 17:34:10', '2025-05-12 17:34:10');
+(157, 'ری گیری احمدی', '88994466', 'تهران بازار', '2025-05-12 17:34:10', '2025-05-12 17:34:10'),
+(158, 'ریگیری حسین', '02188665544', NULL, '2025-06-15 06:27:04', '2025-06-15 06:27:04');
 
 -- --------------------------------------------------------
 
@@ -91,6 +92,13 @@ CREATE TABLE `bank_accounts` (
   `created_at` timestamp NULL DEFAULT current_timestamp(),
   `updated_at` timestamp NULL DEFAULT current_timestamp() ON UPDATE current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='اطلاعات حساب های بانکی کاربر';
+
+--
+-- Dumping data for table `bank_accounts`
+--
+
+INSERT INTO `bank_accounts` (`id`, `account_name`, `bank_name`, `account_number`, `initial_balance`, `current_balance`, `created_at`, `updated_at`) VALUES
+(5, 'شعبه پاسارگاد شهید دنیامالی', 'پاسارگاد', '908560562.55525.105.10.1', 0.00, 0.00, '2025-06-01 09:00:41', '2025-06-01 09:00:41');
 
 -- --------------------------------------------------------
 
@@ -497,7 +505,7 @@ INSERT INTO `products` (`id`, `name`, `category_id`, `product_code`, `unit_of_me
 (32, 'سکه امامی', 21, 'Sekeh_Emami', 'count', '', NULL, NULL, NULL, NULL, 1, NULL, NULL, 750, '2025-05-14 21:37:03', '2025-05-14 21:37:24'),
 (33, 'نیم سکه بهار آزادی', 21, '', 'count', '', NULL, NULL, NULL, NULL, 1, NULL, NULL, 750, '2025-05-14 21:37:14', '2025-05-14 21:37:14'),
 (35, 'مروارید', 27, 'Jewel', 'gram', '', NULL, NULL, NULL, NULL, 1, NULL, NULL, 750, '2025-05-14 21:38:26', '2025-05-14 21:38:26'),
-(36, 'شمش 10 گرمی رزبد', 23, 'Bullion-10G', 'gram', '', 1.0000, NULL, NULL, NULL, 1, 5.0000, NULL, 750, '2025-05-17 17:23:52', '2025-05-17 17:23:52'),
+(36, 'شمش 10 گرمی رزبد', 23, 'Bullion-10G', 'gram', '', 0.0000, NULL, NULL, NULL, 1, 0.0000, NULL, 750, '2025-05-17 17:23:52', '2025-06-01 08:46:50'),
 (37, 'دستبند کارتیه - سایز 10', 22, 'Kartieh-10-Bracelt', 'gram', '', 5.0000, NULL, NULL, NULL, 1, 10.0000, NULL, 750, '2025-05-17 17:25:31', '2025-05-17 17:25:31');
 
 -- --------------------------------------------------------
@@ -632,6 +640,7 @@ CREATE TABLE `transactions` (
   `transaction_date` datetime NOT NULL,
   `calculated_weight_grams` decimal(15,4) DEFAULT NULL,
   `price_per_reference_gram` decimal(20,2) DEFAULT NULL,
+  `mazaneh_price` decimal(20,0) DEFAULT NULL,
   `total_value_rials` decimal(25,2) NOT NULL COMMENT 'مبلغ کل معامله به ریال',
   `usd_rate_ref` decimal(15,2) DEFAULT NULL COMMENT 'نرخ دلار مرجع در زمان معامله',
   `counterparty_contact_id` int(10) UNSIGNED DEFAULT NULL COMMENT 'طرف حساب اصلی (از جدول contacts)',
@@ -999,13 +1008,13 @@ ALTER TABLE `allowed_ips`
 -- AUTO_INCREMENT for table `assay_offices`
 --
 ALTER TABLE `assay_offices`
-  MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=158;
+  MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=159;
 
 --
 -- AUTO_INCREMENT for table `bank_accounts`
 --
 ALTER TABLE `bank_accounts`
-  MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=5;
+  MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=6;
 
 --
 -- AUTO_INCREMENT for table `bank_transactions`
@@ -1143,7 +1152,7 @@ ALTER TABLE `settings`
 -- AUTO_INCREMENT for table `transactions`
 --
 ALTER TABLE `transactions`
-  MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=60;
+  MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=62;
 
 --
 -- AUTO_INCREMENT for table `transaction_items`

@@ -37,7 +37,8 @@ class TransactionRepository {
     public function getById(int $transactionId, bool $lock = false): ?array {
         $this->logger->debug("Fetching transaction with ID: {$transactionId} (Lock: " . ($lock ? 'Yes' : 'No') . ").");
         try {
-            $sql = "SELECT * FROM transactions WHERE id = :id LIMIT 1" . ($lock ? " FOR UPDATE" : "");
+            // FIX: انتخاب تمام ستون‌های summary از جدول transactions
+            $sql = "SELECT t.* FROM transactions t WHERE t.id = :id LIMIT 1" . ($lock ? " FOR UPDATE" : "");
             $stmt = $this->db->prepare($sql);
             $stmt->bindValue(':id', $transactionId, PDO::PARAM_INT);
             $stmt->execute();
@@ -47,7 +48,7 @@ class TransactionRepository {
             return $transaction ?: null;
         } catch (PDOException $e) {
             $this->logger->error("Database error fetching transaction by ID {$transactionId}: " . $e->getMessage(), ['exception' => $e]);
-            throw $e;
+            throw $e; // Re-throw the exception
         }
     }
 
@@ -228,10 +229,10 @@ class TransactionRepository {
              }
 
          } catch (PDOException $e) {
-             $this->logger->error("Database error updating transaction delivery status for ID {$transactionId}: " . $e->getMessage(), ['exception' => $e, 'status' => $status]);
+             $this->logger->error("Database error updating transaction delivery status for ID {$transactionId}: " + $e->getMessage(), ['exception' => $e]);
              throw $e;
          } catch (Throwable $e) {
-              $this->logger->error("Error updating transaction delivery status for ID {$transactionId}: " . $e->getMessage(), ['exception' => $e, 'status' => $status]);
+              $this->logger->error("Error updating transaction delivery status for ID {$transactionId}: " + $e->getMessage(), ['exception' => $e]);
               throw $e;
          }
     }
@@ -345,7 +346,7 @@ class TransactionRepository {
             return $results ?: [];
         } catch (Throwable $e) {
              // Gracefully handle if delivery_status column doesn't exist (from dash.php error handling)
-             if (strpos($e->getMessage(), 'Unknown column') !== false && strpos($e->getMessage(), 'delivery_status') !== false) {
+             if (strpos($e->getMessage(), 'Unknown column') !== false && strpos(str_contains($e->getMessage(), 'delivery_status')) !== false) {
                   $this->logger->warning("Column 'delivery_status' not found, cannot fetch pending summary.", ['status' => $deliveryStatus]);
                   return [];
              }
@@ -425,31 +426,28 @@ class TransactionRepository {
         if (!empty($searchTerm)) {
             $whereOr = [];
             $params = [];
+            // FIX: جستجو در ستون‌های موجود در جدول transactions و contacts
+            $whereOr[] = 'c.name LIKE :search_contact';
+            $whereOr[] = 't.notes LIKE :search_notes';
+            // اگر product_type در transactions وجود ندارد، باید از JOIN با transaction_items و products استفاده شود
+            // $whereOr[] = 'p.name LIKE :search_product_name'; // نیاز به JOIN با products
+            // $whereOr[] = 'ti.tag_number LIKE :search_tag_number'; // نیاز به JOIN با transaction_items
+
+            // پارامترهای جستجو برای فیلدهای بالا
+            $params[':search_contact'] = '%' . $searchTerm . '%';
+            $params[':search_notes'] = '%' . $searchTerm . '%';
+            // $params[':search_product_name'] = '%' . $searchTerm . '%';
+            // $params[':search_tag_number'] = '%' . $searchTerm . '%';
+
+            // اگر جستجو عددی است، در فیلدهای عددی نیز جستجو کن
             if (is_numeric($searchTerm)) {
                 $whereOr[] = 't.id = :search_id';
-                $whereOr[] = 't.weight_grams = :search_weight';
-                $whereOr[] = 't.quantity = :search_qty';
-                $whereOr[] = 't.mazaneh_price = :search_base';
-                $whereOr[] = 't.total_value_rials = :search_total';
-                $whereOr[] = 't.carat = :search_carat';
-                $whereOr[] = 't.melted_tag_number LIKE :search_tag';
+                $whereOr[] = 't.mazaneh_price = :search_mazaneh';
+                $whereOr[] = 't.total_value_rials = :search_total_value';
                 $params[':search_id'] = (int)$searchTerm;
-                $params[':search_weight'] = $searchTerm;
-                $params[':search_qty'] = $searchTerm;
-                $params[':search_base'] = $searchTerm;
-                $params[':search_total'] = $searchTerm;
-                $params[':search_carat'] = $searchTerm;
-                $params[':search_tag'] = '%' . $searchTerm . '%';
+                $params[':search_mazaneh'] = (float)$searchTerm;
+                $params[':search_total_value'] = (float)$searchTerm;
             }
-            // همیشه جستجو در فیلدهای متنی (حتی اگر فقط عدد باشد)
-            $whereOr[] = 'c.name LIKE :search1';
-            $whereOr[] = 't.notes LIKE :search2';
-            $whereOr[] = 't.product_type LIKE :search3';
-            // $whereOr[] = 'ao.name LIKE :search4'; // REMOVED
-            $params[':search1'] = '%' . $searchTerm . '%';
-            $params[':search2'] = '%' . $searchTerm . '%';
-            $params[':search3'] = '%' . $searchTerm . '%';
-            // $params[':search4'] = '%' . $searchTerm . '%'; // REMOVED
             $where[] = '(' . implode(' OR ', $whereOr) . ')';
         }
         $whereClause = $where ? ('WHERE ' . implode(' AND ', $where)) : '';
@@ -462,12 +460,15 @@ class TransactionRepository {
     public function getFilteredAndPaginated(array $filters = [], ?string $searchTerm = null, int $limit = 15, int $offset = 0): array {
         $this->logger->debug("Fetching filtered & paginated transactions.", ['filters' => $filters, 'searchTerm' => $searchTerm, 'limit' => $limit, 'offset' => $offset]);
         [$whereClause, $params] = $this->buildWhereClause($filters, $searchTerm);
-        // REMOVED assay_office_name from SELECT and the JOIN
-        $sql = "SELECT t.*, c.name AS counterparty_name -- REMOVED assay_office info
+        
+        // FIX: اضافه کردن JOIN با transaction_items و products برای جستجو در نام محصول و شماره انگ
+        $sql = "SELECT t.*, c.name AS counterparty_name 
                 FROM transactions t
                 LEFT JOIN contacts c ON t.counterparty_contact_id = c.id
-                -- LEFT JOIN assay_offices ao ON t.assay_office_id = ao.id -- REMOVED
-                $whereClause
+                -- FIX: اگر جستجو در product_name یا tag_number فعال شود، این JOINها لازم هستند
+                -- LEFT JOIN transaction_items ti ON t.id = ti.transaction_id
+                -- LEFT JOIN products p ON ti.product_id = p.id
+                {$whereClause}
                 ORDER BY t.transaction_date DESC, t.id DESC
                 LIMIT :limit OFFSET :offset";
         try {
@@ -509,7 +510,10 @@ class TransactionRepository {
         }
         $sql .= " ORDER BY transaction_date ASC, id ASC";
         $stmt = $this->db->prepare($sql);
-        $stmt->execute($params);
+        foreach ($params as $k => $val) { // FIX: استفاده از foreach برای bindParams
+            $stmt->bindValue($k, $val, is_int($val) ? PDO::PARAM_INT : PDO::PARAM_STR);
+        }
+        $stmt->execute();
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
     /**
@@ -535,6 +539,7 @@ class TransactionRepository {
         }
         $sql .= " ORDER BY transaction_date ASC, id ASC";
         $stmt = $this->db->prepare($sql);
+        // FIX: استفاده از bindValue برای پارامترهای موقعیتی
         foreach ($params as $k => $val) {
             $stmt->bindValue($k + 1, $val, is_int($val) ? PDO::PARAM_INT : PDO::PARAM_STR);
         }
@@ -580,9 +585,8 @@ class TransactionRepository {
     {
         $this->logger->debug("Fetching transaction with items for ID: {$transactionId}.");
         try {
-            // 1. Get the transaction data with joins for complete data
+            // 1. Get the main transaction data
             $sql = "SELECT t.* FROM transactions t WHERE t.id = :id LIMIT 1";
-            
             $stmt = $this->db->prepare($sql);
             $stmt->bindValue(':id', $transactionId, PDO::PARAM_INT);
             $stmt->execute();
@@ -593,9 +597,9 @@ class TransactionRepository {
                 return null;
             }
             
-            // اطلاعات مخاطب را دریافت کنیم - فقط نام و details را دریافت می‌کنیم
+            // اطلاعات مخاطب را دریافت کنیم - شامل phone و national_code
             if (!empty($transaction['counterparty_contact_id'])) {
-                $contactSql = "SELECT id, name, details, type FROM contacts WHERE id = :contact_id";
+                $contactSql = "SELECT id, name, phone, national_code, details, type FROM contacts WHERE id = :contact_id"; 
                 $contactStmt = $this->db->prepare($contactSql);
                 $contactStmt->bindValue(':contact_id', $transaction['counterparty_contact_id'], PDO::PARAM_INT);
                 $contactStmt->execute();
@@ -603,40 +607,10 @@ class TransactionRepository {
                 
                 if ($contact) {
                     $transaction['party_name'] = $contact['name'] ?? '';
+                    $transaction['party_phone'] = $contact['phone'] ?? ''; 
+                    $transaction['party_national_code'] = $contact['national_code'] ?? ''; 
                     $transaction['party_details'] = $contact['details'] ?? '';
                     $transaction['party_type'] = $contact['type'] ?? '';
-                    
-                    // تلاش برای استخراج شماره تماس و کد ملی از details
-                    $details = $contact['details'] ?? '';
-                    
-                    // الگوهای احتمالی شماره تماس در متن details
-                    $phonePatterns = [
-                        '/(\b\d{8,11}\b)/',                           // اعداد 8 تا 11 رقمی
-                        '/(\b\d{3,4}[\s\-]\d{3,4}[\s\-]\d{4}\b)/',    // الگوی 123-456-7890
-                        '/(\b\d{4}[\s\-]\d{7,8}\b)/',                 // الگوی 0123-4567890
-                    ];
-                    
-                    // تلاش برای پیدا کردن شماره تماس
-                    $phoneFound = false;
-                    foreach ($phonePatterns as $pattern) {
-                        if (preg_match($pattern, $details, $matches)) {
-                            $transaction['party_phone'] = $matches[1];
-                            $phoneFound = true;
-                            break;
-                        }
-                    }
-                    
-                    if (!$phoneFound) {
-                        // اگر هیچ شماره‌ای پیدا نشد، اطلاعات details را استفاده کن
-                        $transaction['party_phone'] = $details;
-                    }
-                    
-                    // بررسی برای کد ملی (معمولاً 10 رقم)
-                    if (preg_match('/\b(\d{10})\b/', $details, $matches)) {
-                        $transaction['party_national_code'] = $matches[1];
-                    } else {
-                        $transaction['party_national_code'] = '';
-                    }
                 }
             }
             
@@ -651,11 +625,43 @@ class TransactionRepository {
                 }
             }
             
-            // 2. Get associated items with complete data
-            $items = $this->transactionItemRepository->findByTransactionId($transactionId);
+            // 2. Get associated items with complete product and category details for JS rendering
+            // FIX: JOIN با products و product_categories برای دریافت tax/vat و base_category
+            $itemsSql = "SELECT
+                            ti.*,
+                            p.name as product_name,
+                            p.product_code,
+                            p.unit_of_measure as product_unit_of_measure,
+                            p.default_carat,
+                            p.coin_year,
+                            p.is_bank_coin,
+                            p.tax_enabled,
+                            p.tax_rate,
+                            p.vat_enabled,
+                            p.vat_rate,
+                            pc.name as product_category_name,
+                            pc.code as product_category_code,
+                            pc.base_category as product_category_base,
+                            ao.name as assay_office_name
+                        FROM
+                            transaction_items ti
+                        JOIN
+                            products p ON ti.product_id = p.id
+                        JOIN
+                            product_categories pc ON p.category_id = pc.id
+                        LEFT JOIN
+                            assay_offices ao ON ti.assay_office_id = ao.id
+                        WHERE
+                            ti.transaction_id = :transaction_id
+                        ORDER BY ti.id ASC";
+
+            $itemsStmt = $this->db->prepare($itemsSql);
+            $itemsStmt->bindValue(':transaction_id', $transactionId, PDO::PARAM_INT);
+            $itemsStmt->execute();
+            $items = $itemsStmt->fetchAll(PDO::FETCH_ASSOC);
 
             // 3. Attach items to the transaction array
-            $transaction['items'] = $items; // $items will be an array (possibly empty)
+            $transaction['items'] = $items; 
 
             $this->logger->debug("Transaction and items fetched successfully.", ['id' => $transactionId, 'item_count' => count($transaction['items'])]);
             return $transaction;
