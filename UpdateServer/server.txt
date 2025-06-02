@@ -1,0 +1,140 @@
+Folder PATH listing
+Volume serial number is 748D-1402
+D:\xampp\htdocs\UpdateServer\.
+|   .editorconfig
+|   .env
+|   .gitattributes
+|   .gitignore
+|   artisan
+|   composer.json
+|   composer.lock
+|   package-lock.json
+|   package.json
+|   phpunit.xml
+|   postcss.config.js
+|   tailwind.config.js
+|   vite.config.js
+|   
++---App
+|   +---Http
+|   |   |   Kernel.php
+|   |   |   
+|   |   +---Controllers
+|   |   |   |   AdminAuthController.php
+|   |   |   |   Controller.php
+|   |   |   |   DashboardController.php
+|   |   |   |   LandingPageController.php
+|   |   |   |   ProfileController.php
+|   |   |   |   SupportTicketController.php
+|   |   |   |   
+|   |   |   +---Admin
+|   |   |   |       CustomerController.php
+|   |   |   |       DashboardController.php
+|   |   |   |       LicenseController.php
+|   |   |   |       SupportTicketController.php
+|   |   |   |       SystemController.php
+|   |   |   |       
+|   |   |   +---Api
+|   |   |   |       BackupController.php
+|   |   |   |       CustomerController.php
+|   |   |   |       EmailController.php
+|   |   |   |       EncryptionKeyController.php
+|   |   |   |       LicenseController.php
+|   |   |   |       LogController.php
+|   |   |   |       SmsController.php
+|   |   |   |       SyncController.php
+|   |   |   |       SystemController.php
+|   |   |   |       
+|   |   |   \---Auth
+|   |   |           AdminLoginController.php
+|   |   |           AuthenticatedSessionController.php
+|   |   |           ConfirmablePasswordController.php
+|   |   |           EmailVerificationNotificationController.php
+|   |   |           EmailVerificationPromptController.php
+|   |   |           NewPasswordController.php
+|   |   |           PasswordController.php
+|   |   |           PasswordResetLinkController.php
+|   |   |           RegisteredUserController.php
+|   |   |           VerifyEmailController.php
+|   |   |           
+|   |   +---Middleware
+|   |   |       AdminAuth.php
+|   |   |       ApiSecurity.php
+|   |   |       Authenticate.php
+|   |   |       RedirectIfAuthenticated.php
+|   |   |       
+|   |   \---Requests
+|   |       |   ProfileUpdateRequest.php
+|   |       |   
+|   |       \---Auth
+|   |               LoginRequest.php
+|   |               
+|   +---Models
+|   |       Admin.php
+|   |       Backup.php
+|   |       Customer.php
+|   |       CustomerActivityLog.php
+|   |       EmailLog.php
+|   |       EncryptionKey.php
+|   |       License.php
+|   |       Log.php
+|   |       SmsLog.php
+|   |       SmsSetting.php
+|   |       SupportTicket.php
+|   |       System.php
+|   |       TicketReply.php
+|   |       User.php
+|   |       Version.php
+|   |       
+|   +---Providers
+|   |       AppServiceProvider.php
+|   |       
+|   \---View
+|       \---Components
+|               AppLayout.php
+|               GuestLayout.php
+|               
++---bootstrap
+|   |   app.php
+|   |   providers.php
+|   |   
+|   \---cache
+|           .gitignore
+|           packages.php
+|           services.php
+|           
++---config
+|       app.php
+|       auth.php
+|       cache.php
+|       database.php
+|       filesystems.php
+|       license.php
+|       logging.php
+|       mail.php
+|       queue.php
+|       services.php
+|       session.php
+|       
++---database
+|   |   .gitignore
+|   |   database.sqlite
+|   |   
+|   +---factories
+|   |       UserFactory.php
+|   |       
+|   +---migrations
+|   |       0001_01_01_000000_create_users_table.php
+|   |       0001_01_01_000001_create_cache_table.php
+|   |       0001_01_01_000002_create_jobs_table.php
+|   |       2025_05_03_185755_create_core_tables.php
+|   |       2025_05_05_114552_add_company_fields_to_users_table.php
+|   |       2025_05_05_133210_create_support_tickets_table.php
+|   |       2025_05_05_143024_create_ticket_replies_table.php
+|   |       2025_05_06_043240_add_user_id_to_customers_table.php
+|   |       2025_05_06_053240_create_api_table.php
+|   |       
+|   \---seeders
+|           DatabaseSeeder.php
+|           SystemSeeder.php
+|           TestDataSeeder.php

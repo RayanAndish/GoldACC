@@ -1,0 +1,613 @@
+/* public/css/style.css - FINAL - Clean & Structured */
+
+/* --- 1. Font Definition --- */
+@font-face {
+  font-family: 'Vazirmatn';
+  src: url('https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Round-Dots/fonts/webfonts/Vazirmatn-RD[wght].woff2') format('woff2 supports variations'),
+       url('https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Round-Dots/fonts/webfonts/Vazirmatn-RD[wght].woff2') format('woff2-variations');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* --- 2. General Body & App Styles --- */
+html, body {
+  height: 100%;
+}
+
+body#app-body {
+  display: flex;
+  flex-direction: column;
+  font-family: 'Vazirmatn', Tahoma, Arial, sans-serif;
+  background-color: #f8f9fa; /* Light background for the app */
+  font-size: 0.95rem;
+  direction: rtl;
+  text-align: right;
+  color: #212529;
+  line-height: 1.6;
+  min-height: 100vh; /* Ensure takes full height */
+}
+
+/* Main content area padding when navbar is fixed */
+main.container {
+  flex: 1 0 auto; /* Allows content to grow and shrink, prevents shrinking below content size */
+  padding-top: 70px; /* Adjust based on actual navbar height */
+  width: 100%;
+}
+
+/* Footer basic styling for app */
+#app-body .footer {
+  flex-shrink: 0; /* Prevent footer from shrinking */
+  background-color: #e9ecef;
+  padding: 1rem 0;
+  text-align: center;
+  font-size: 0.85rem;
+  color: #6c757d;
+  border-top: 1px solid #dee2e6;
+}
+
+
+/* --- 3. Navbar (App Specific) --- */
+#app-body .navbar.fixed-top {
+  background-color: #2c3e50; /* Dark blue-grey */
+  box-shadow: 0 2px 5px rgba(0, 0, 0, .15);
+}
+#app-body .navbar-brand {
+  color: #f8f9fa !important;
+  font-weight: 600;
+}
+#app-body .navbar-brand:hover {
+  color: #ffffff !important;
+  opacity: 0.9;
+}
+#app-body .navbar-nav .nav-link {
+  color: rgba(255, 255, 255, 0.85) !important;
+  font-size: 0.9rem;
+  padding: 0.5rem 0.8rem !important;
+  border-radius: 0.25rem;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+#app-body .navbar-nav .nav-link:hover,
+#app-body .navbar-nav .nav-link:focus {
+  color: #ffffff !important;
+  background-color: rgba(255, 255, 255, 0.1);
+}
+#app-body .navbar-nav .nav-link.active,
+#app-body .navbar-nav .nav-item.show > .nav-link.dropdown-toggle {
+  color: #ffffff !important;
+  background-color: rgba(255, 255, 255, 0.2) !important;
+  font-weight: 500;
+}
+#app-body .dropdown-menu {
+  font-size: 0.9rem;
+  border: 1px solid rgba(0, 0, 0, .1);
+  box-shadow: 0 .25rem .75rem rgba(0, 0, 0, .1);
+  margin-top: 0.125rem !important; /* Ensure dropdown aligns below navbar item */
+  text-align: right; /* RTL support */
+}
+#app-body .dropdown-item {
+  padding: 0.35rem 1rem;
+  transition: background-color 0.15s ease;
+}
+#app-body .dropdown-item.active,
+#app-body .dropdown-item:active {
+  /* Bootstrap usually handles this, but ensure it's styled */
+  font-weight: 500;
+}
+#app-body .navbar-collapse .navbar-nav.ms-auto .dropdown-menu {
+  /* Position dropdown correctly when aligned to the end (ms-auto) */
+  left: 0 !important;
+  right: auto !important;
+}
+
+
+/* --- 4. Cards (App Specific) --- */
+#app-body .card {
+  border: 1px solid #e9ecef;
+  margin-bottom: 1.5rem;
+  border-radius: 0.375rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .05);
+  background-color: #fff;
+}
+#app-body .card-header {
+  background-color: #f8f9fa;
+  border-bottom: 1px solid #e9ecef;
+  font-weight: 600;
+  padding: 0.7rem 1rem;
+  color: #343a40;
+}
+#app-body .card-header h5 { /* Adjust if h5 is used in card headers */
+  font-size: 1.1rem; /* Example size adjustment */
+  margin-bottom: 0;
+}
+#app-body .card-body {
+  padding: 1.25rem;
+}
+#app-body .card-footer {
+  background-color: #f8f9fa;
+  border-top: 1px solid #e9ecef;
+  padding: 0.6rem 1rem;
+}
+
+
+/* --- 5. Buttons (App Specific) --- */
+#app-body .btn {
+  border-radius: 0.25rem;
+  padding: 0.4rem 0.9rem;
+  transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+#app-body .btn-sm {
+  font-size: 0.8rem; /* Slightly smaller */
+  padding: 0.25rem 0.5rem; /* Adjusted padding */
+}
+#app-body .btn .fas, /* Font Awesome icons */
+#app-body .btn .bi {  /* Bootstrap icons */
+  margin-left: 0.4rem; /* Space between icon and text (RTL) */
+  margin-right: 0;
+}
+
+
+/* --- 6. Tables (App Specific) --- */
+#app-body .table {
+  margin-bottom: 0; /* Often used within cards or containers */
+  width: 100%;
+  border-color: #dee2e6;
+}
+#app-body .table th,
+#app-body .table td {
+  font-size: 0.9rem; /* Slightly smaller font for tables */
+  padding: 0.6rem 0.5rem;
+  vertical-align: middle;
+  border-top: 1px solid #dee2e6;
+}
+#app-body .table > thead {
+    background-color: #eef2f7; /* Light background for header */
+    color: #495057;
+}
+#app-body .table > thead > tr > th {
+  border-bottom-width: 2px; /* Thicker bottom border for header */
+  white-space: nowrap;
+  text-align: center;
+  font-weight: 600;
+}
+#app-body .table > tbody > tr > td {
+  text-align: center !important; /* Force center align for data cells? Reconsider if needed */
+}
+#app-body .table > tbody tr:hover {
+  background-color: rgba(0, 0, 0, 0.04); /* Subtle hover effect */
+}
+
+/* Align specific columns */
+#app-body .table th.text-right,
+#app-body .table td.text-right { text-align: right !important; }
+#app-body .table th.text-left,
+#app-body .table td.text-left { text-align: left !important; }
+#app-body .table th.text-center,
+#app-body .table td.text-center { text-align: center !important; }
+
+
+/* Number and Currency Styling */
+#app-body .number-fa {
+  font-family: 'Vazirmatn', Consolas, Monaco, monospace !important; /* Ensure Vazirmatn for numbers */
+  direction: rtl !important; /* Numbers should generally be LTR even in RTL */
+  white-space: nowrap !important;
+  text-align: center !important; /* Keep centered for now */
+}
+#app-body .currency-unit {
+  font-size: 0.75em;
+  color: #6c757d;
+  margin-right: 0.25rem; /* Space before unit (RTL) */
+  vertical-align: baseline;
+}
+#app-body .table td.money,
+#app-body .table td.rial-amount {
+  font-family: 'Vazirmatn', Consolas, Monaco, monospace;
+  direction: rtl; /* Ensure LTR for amounts */
+  text-align: left !important; /* Amounts usually left-aligned */
+  padding-left: 0.8rem;
+  padding-right: 0.5rem;
+}
+#app-body .table td.money,
+#app-body .table td.rial-amount {
+  padding-left: 0.8rem;
+  padding-right: 0.5rem;
+}
+
+/* Table Footer */
+#app-body .table > tfoot > tr > td {
+  font-weight: bold;
+  text-align: center;
+  border-top: 2px solid #dee2e6; /* Separator for footer */
+}
+#app-body .table > tfoot > tr > td:first-child {
+  text-align: right; /* Label usually right aligned */
+}
+#app-body .table > tfoot > tr > td.money,
+#app-body .table > tfoot > tr > td.number-fa {
+  text-align: center !important; /* Totals usually left aligned */
+}
+
+
+/* --- 7. Forms (App Specific) --- */
+#app-body .form-control,
+#app-body .form-select {
+  font-size: 0.95rem; /* Match base font size */
+  border-color: #ced4da;
+  transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+}
+#app-body .form-control:focus,
+#app-body .form-select:focus {
+  border-color: #86b7fe;
+  box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
+}
+#app-body .form-control-sm,
+#app-body .form-select-sm {
+  font-size: 0.85rem; /* Smaller font for small controls */
+}
+#app-body label {
+  font-weight: 500;
+  font-size: 0.9rem; /* Slightly smaller label */
+  margin-bottom: 0.3rem;
+}
+#app-body .form-text {
+  font-size: 0.85rem; /* Smaller help text */
+  color: #6c757d;
+}
+#app-body input.format-number-js { /* Input for numbers formatted by JS */
+  text-align: left !important; /* Numbers often align left */
+  direction: ltr !important;
+  font-family: 'Vazirmatn', Consolas, monospace;
+}
+
+
+/* --- 8. Utilities --- */
+.no-print { display: initial; } /* Default state */
+
+
+/* --- 9. Print Styles (Comprehensive) --- */
+@media print {
+    @page {
+      size: A4 landscape; /* جهت افقی */
+      margin: 0.8cm 1cm; /* حاشیه مناسب (می توانید تنظیم کنید) */
+    }
+
+    html, body {
+        background-color: #ffffff !important;
+        font-size: 9pt !important; /* Smaller font for print */
+        color: #000000 !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+        width: 100% !important;
+        height: auto !important;
+        display: block !important; /* Override flex for body */
+        text-align: right !important; /* Ensure text align for body */
+    }
+
+    /* Hide unwanted elements */
+    .no-print,
+    nav.navbar,
+    footer.footer, /* Main site footer, not invoice footer */
+    form,
+    .btn, /* Hide all buttons */
+    #debug-info /* Assuming a debug section might exist */
+    {
+        display: none !important;
+    }
+
+     /* Invoice container */
+     .invoice-container {
+      max-width: 100% !important;
+      width: 100% !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      border: none !important;
+      box-shadow: none !important;
+      background-color: #fff !important;
+    }
+    main.container { padding-top: 0 !important; } /* حذف پدینگ بالای main */
+
+     /* Invoice header and details */
+     .invoice-header { margin-bottom: 15px !important; padding-bottom: 10px !important; border-bottom: 1.5px solid #000 !important;}
+     .invoice-details p { margin-bottom: 2px !important; font-size: 8.5pt !important; }
+     .invoice-details strong { min-width: 60px !important; } /* Adjust if needed */
+
+
+    /* Items table */
+     .invoice-items-table {
+         width: 100% !important;
+         border-collapse: collapse !important;
+         margin-top: 10px !important;
+         table-layout: fixed !important;
+         font-size: 8pt !important;
+     }
+    .invoice-items-table th,
+    .invoice-items-table td {
+        border: 1px solid #777 !important;
+        padding: 3px 4px !important;
+        vertical-align: middle !important;
+        word-wrap: break-word;
+        line-height: 1.3 !important;
+        text-align: center;
+     }
+    .invoice-items-table thead th {
+        background-color: #eee !important;
+        font-weight: bold;
+        text-align: center;
+    }
+    .invoice-items-table th[rowspan="2"] { vertical-align: middle !important; }
+    .invoice-items-table thead tr:last-child th { font-size: 7.5pt !important; } /* Smaller sub-headers */
+
+     /* Specific column alignments and styling */
+     .invoice-items-table td.desc { text-align: right !important; }
+     .invoice-items-table td.desc .item-details { /* Optional sub-details */
+         font-size: 0.9em;
+         color: #444 !important;
+         margin-top: 1px;
+         display: block; /* Ensure it takes its own line */
+     }
+     .invoice-items-table td.num,
+     .invoice-items-table td.money {
+         text-align: center !important; /* Center numbers/money */
+         font-family: 'Vazirmatn', monospace;
+         direction: ltr !important; /* Ensure LTR for numerical data */
+     }
+
+     /* جدول آیتم ها */
+    .invoice-items-table { width: 100% !important; border-collapse: collapse !important; margin-top: 10px !important; table-layout: fixed; font-size: 8pt !important;} /* فونت کوچک تر برای جدول */
+    .invoice-items-table th,
+    .invoice-items-table td {
+        border: 1px solid #777 !important; /* بوردر واضح تر در چاپ سیاه سفید */
+        padding: 3px 4px !important; /* پدینگ فشرده تر */
+        vertical-align: middle !important;
+        word-wrap: break-word;
+        line-height: 1.3 !important;
+     }
+    .invoice-items-table thead th { background-color: #eee !important; font-weight: bold; text-align: center; }
+    .invoice-items-table th[rowspan="2"] { vertical-align: middle !important; }
+    .invoice-items-table thead tr:last-child th {font-size: 7.5pt !important; } /* زیر هدر کوچک تر */
+
+     .invoice-items-table td.desc { text-align: right; }
+     .invoice-items-table td.desc .item-details { font-size: 0.9em; color: #444 !important; margin-top: 1px;}
+     .invoice-items-table td.num, .invoice-items-table td.money { text-align: center !important; } /* اعداد وسط چین بهترند */
+     .invoice-items-table td.number-fa {direction: ltr !important;} /* جهت LTR برای اعداد */
+
+     /* عرض ستون‌ها برای Landscape (با جمع حدود 100%) */
+     .invoice-items-table th:nth-child(1), .invoice-items-table td:nth-child(1) { width: 3%; }  /* ر */
+     .invoice-items-table th:nth-child(2), .invoice-items-table td:nth-child(2) { width: 33%; } /* شرح */
+     .invoice-items-table th:nth-child(3), .invoice-items-table td:nth-child(3) { width: 8%; }  /* مقدار */
+     .invoice-items-table th:nth-child(4), .invoice-items-table td:nth-child(4) { width: 7%; }  /* عیار/سال */
+     .invoice-items-table th:nth-child(5), .invoice-items-table td:nth-child(5) { width: 8%; } /* وزن 750 */
+     .invoice-items-table th:nth-child(6), .invoice-items-table td:nth-child(6) { width: 11%; } /* مظنه/نرخ */
+     .invoice-items-table th:nth-child(7), .invoice-items-table td:nth-child(7) { width: 11%; } /* ق ۱ گرم */
+     .invoice-items-table th:nth-child(8), .invoice-items-table td:nth-child(8) { width: 9%; } /* وضعیت */
+     .invoice-items-table th:nth-child(9), .invoice-items-table td:nth-child(9) { width: 10%; } /* مبلغ کل */
+
+      /* جلوگیری از شکستن سطر */
+     .invoice-items-table tbody tr { page-break-inside: avoid !important; }
+      /* نمایش هدر و فوتر جدول در هر صفحه */
+      .invoice-items-table thead { display: table-header-group !important; }
+      .invoice-items-table tfoot { display: table-footer-group !important; border-top: none !important; /* Reset top border in case */}
+      /* استایل جمع بندی */
+      .invoice-items-table tfoot td { border: none !important; font-size: 8.5pt !important;}
+      .invoice-items-table tfoot tr:nth-last-child(2) td { border-top: 1px solid #999 !important; } /* Line above final total */
+       .invoice-items-table tfoot tr:nth-last-child(3) td { border-top: 1px solid #eee !important; } /* Line above tax (optional) */
+
+       .signature-area { margin-top: 30px !important; padding-top: 10px !important; }
+       .signature-area p { border-top: 1px dotted #777 !important; padding-top: 3px; margin-bottom: 10px; }
+
+       .invoice-footer { border-top: 1px solid #ccc !important; padding-top: 5px !important; margin-top: 20px !important; }
+
+       /* Remove link styling */
+       a { text-decoration: none !important; color: inherit !important; }
+       a[href]:after { content: none !important; } /* Remove URL print */
+
+} /* --- End @media print --- */
+
+
+/* --- 10. Landing Page Theme (Dark) --- */
+body.landing-page {
+  font-family: 'Vazirmatn', sans-serif;
+  background-color: #121212; /* Dark background */
+  color: #e0e0e0; /* Light gray text */
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  box-sizing: border-box;
+  direction: rtl;
+  text-align: right;
+  line-height: 1.7; /* Slightly increased line height for readability */
+}
+
+/* Landing Container */
+body.landing-page .landing-container {
+  display: flex;
+  flex-direction: row; /* Side-by-side layout */
+  align-items: center;
+  justify-content: space-between;
+  max-width: 1100px;
+  width: 90%;
+  background: #1e1e1e; /* Slightly lighter dark shade */
+  padding: 40px 50px;
+  border-radius: 15px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  margin: auto; /* Center container vertically and horizontally */
+  flex-shrink: 0;
+}
+
+/* Landing Content (Text) */
+body.landing-page .landing-content {
+  flex: 1; /* Take available space */
+  padding-left: 40px; /* Space between text and image (RTL) */
+  max-width: 50%;
+}
+
+body.landing-page .landing-content h1 {
+  font-size: 2.8rem;
+  font-weight: 700; /* Bolder heading */
+  color: #fdd835; /* Gold color */
+  margin-bottom: 25px;
+  line-height: 1.3;
+}
+
+body.landing-page .landing-content p {
+  font-size: 1.1rem;
+  margin-bottom: 35px;
+  color: #bdbdbd; /* Slightly adjusted light gray */
+}
+
+/* Landing Buttons */
+body.landing-page .buttons {
+  display: flex;
+  flex-wrap: wrap; /* Allow buttons to wrap on smaller screens */
+  gap: 15px; /* Space between buttons */
+}
+
+body.landing-page .btn { /* Specific styling for landing buttons */
+  display: inline-block;
+  padding: 12px 28px; /* Slightly more padding */
+  font-size: 1rem;
+  font-weight: 600; /* Bold text */
+  color: #121212 !important; /* Dark text on gold button */
+  background-color: #fdd835 !important; /* Gold background */
+  border: none;
+  border-radius: 8px;
+  text-decoration: none;
+  text-align: center;
+  transition: all 0.3s ease;
+  cursor: pointer;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2); /* Subtle shadow */
+}
+
+body.landing-page .btn:hover {
+  background-color: #ffca28 !important; /* Lighter gold on hover */
+  color: #000000 !important;
+  transform: translateY(-3px); /* Slight lift effect */
+  box-shadow: 0 6px 20px rgba(253, 216, 53, 0.3); /* Enhanced shadow on hover */
+}
+
+/* Landing Image */
+body.landing-page .landing-image {
+  flex: 1; /* Take available space */
+  text-align: center; /* Center image within its container */
+  max-width: 45%;
+}
+
+body.landing-page .landing-image img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 10px;
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.5); /* More pronounced shadow */
+}
+
+/* Landing Footer */
+body.landing-page footer.landing-footer {
+  margin-top: auto; /* Pushes footer to the bottom */
+  width: 100%;
+  padding: 20px 0; /* More padding */
+  background-color: #1c1c1c; /* Match container background or slightly different */
+  /* border-top: 1px solid #333; */ /* Optional border */
+  color: #a0a0a0; /* Footer text color */
+  flex-shrink: 0; /* Prevent footer from shrinking */
+  text-align: center;
+}
+
+body.landing-page footer.landing-footer .container {
+  max-width: 1100px; /* Match landing container width */
+  padding: 0 15px; /* Add padding inside container */
+}
+
+body.landing-page footer.landing-footer a {
+  color: #c0c0c0;
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+
+body.landing-page footer.landing-footer a:hover {
+  color: #ffffff;
+}
+
+body.landing-page footer.landing-footer .text-separator {
+  margin: 0 10px; /* More space around separator */
+  color: #555;
+}
+body.landing-page footer.landing-footer .tech-info {
+    font-size: 0.8rem;
+    margin-top: 8px;
+    color: #666;
+}
+
+/* --- Media Queries for Landing Page --- */
+@media (max-width: 992px) {
+  body.landing-page .landing-container { padding: 30px 35px; width: 95%; }
+  body.landing-page .landing-content { padding-left: 25px; max-width: 55%; } /* Adjust RTL padding */
+  body.landing-page .landing-content h1 { font-size: 2.4rem; }
+  body.landing-page .landing-image { max-width: 40%; }
+}
+
+@media (max-width: 768px) {
+  body.landing-page { line-height: 1.6; } /* Adjust line height for smaller screens */
+  body.landing-page .landing-container {
+      flex-direction: column; /* Stack content and image */
+      text-align: center;
+      padding: 40px 25px; /* Adjust padding */
+      width: 95%;
+      margin-top: 30px; /* Add margin top/bottom */
+      margin-bottom: 30px;
+  }
+  body.landing-page .landing-content {
+      padding-left: 0; /* Remove padding */
+      margin-bottom: 40px; /* Space below text */
+      max-width: 100%;
+      order: 2; /* Text below image */
+  }
+  body.landing-page .landing-content h1 { font-size: 2.1rem; }
+  body.landing-page .landing-content p { font-size: 1rem; }
+  body.landing-page .landing-image {
+      max-width: 70%; /* Adjust image size */
+      margin: 0 auto 30px auto; /* Center image, add space below */
+      order: 1; /* Image above text */
+  }
+  body.landing-page .buttons {
+      justify-content: center; /* Center buttons */
+      flex-direction: column; /* Stack buttons */
+      align-items: stretch; /* Make buttons full width */
+      width: 80%;
+      max-width: 300px; /* Limit button width */
+      margin: 0 auto;
+  }
+  body.landing-page .btn { padding: 14px 20px; font-size: 1rem; } /* Adjust button padding/size */
+  body.landing-page footer.landing-footer { padding: 15px 0; }
+  body.landing-page footer.landing-footer .container { width: 95%; }
+  body.landing-page footer.landing-footer small { font-size: 0.8rem; }
+  /* body.landing-page footer.landing-footer .tech-info { display: none; } */ /* Hide tech info on mobile if needed */
+}
+
+@media (max-width: 480px) {
+  body.landing-page .landing-content h1 { font-size: 1.9rem; }
+  body.landing-page .buttons { width: 90%; }
+}
+
+/* --- 9. Component Specific Overrides --- */
+
+/* Bootstrap Badge Text Color for Contrast */
+.badge.bg-success,
+.badge.bg-info,
+.badge.bg-warning,
+.badge.bg-secondary,
+.badge.bg-light { /* Add other backgrounds if needed */
+    color: #212529 !important; /* Use dark text for light backgrounds */
+}
+
+.badge.bg-primary,
+.badge.bg-danger,
+.badge.bg-dark {
+    color: #fff !important; /* Keep white text for dark backgrounds */
+}
+
+
+/* Fix potential datepicker display issue (if styles interfere) */
+/* Add specific rules for .datepicker-days, .day etc. if needed */
+
+/* --- 10. Print Styles (Keep at the end) --- */
+/* ... existing print styles ... */

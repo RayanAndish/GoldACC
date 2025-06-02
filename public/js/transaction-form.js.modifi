@@ -1,0 +1,2042 @@
+// Transaction Form Logic (public/js/transaction-form.js)
+
+// Ensure jQuery is loaded before this script
+if (typeof jQuery === 'undefined') {
+    console.error('jQuery is not loaded. Please ensure jQuery is loaded before transaction-form.js');
+    // Optionally, stop script execution or load jQuery dynamically
+    // throw new Error('jQuery not loaded');
+}
+
+// --- Core Data Management ---
+// این کلاس داده‌های اولیه و منطق دسترسی به آن‌ها را مدیریت می‌کند.
+class TransactionData {
+    constructor() {
+        // دریافت داده‌ها از متغیرهای window و تضمین وجود آن‌ها
+        this._allFieldsData = window.allFieldsData?.fields || [];
+        this._allFormulasData = window.allFormulasData?.formulas || [];
+        this._productsData = window.productsData || [];
+        this._transactionItemsData = window.transactionItemsData || [];
+        this._baseUrl = window.baseUrl || '';
+        this._messages = window.MESSAGES || {};
+        // این نگاشت باید از بک‌اند بیاید و کدهای عددی/رشته‌ای را به base_category انگلیسی نگاشت کند
+        this._categoryIdToBaseCategory = window.categoryIdToBaseCategory || {};
+
+        console.log("TransactionData initialized:", {
+            fieldsCount: this._allFieldsData.length,
+            formulasCount: this._allFormulasData.length,
+            productsCount: this._productsData.length,
+            transactionItemsCount: this._transactionItemsData.length,
+            baseUrl: this._baseUrl
+        });
+
+        // استخراج همه گروه‌های کالا به صورت داینامیک از فیلدها و فرمول‌ها
+        this._allProductGroups = this._extractAllProductGroups();
+
+        // استخراج فیلدهای کلی و فیلدهای گروهی
+        this._generalFields = this._allFieldsData.filter(field => !field.group || field.group.toLowerCase() === 'همه');
+        this._groupedFields = this._allFieldsData.filter(field => field.group && field.group.toLowerCase() !== 'همه');
+
+         // ایجاد یک نگاشت سریع از فیلدها بر اساس نامشان برای دسترسی سریع
+        this._fieldsByName = this._allFieldsData.reduce((map, field) => {
+            map[field.name] = field;
+            return map;
+        }, {});
+
+         // ایجاد یک نگاشت سریع از فرمول‌ها بر اساس خروجی‌شان
+        this._formulasByOutput = this._allFormulasData.reduce((map, formula) => {
+             if (formula.output_field) {
+                 if (!map[formula.output_field]) {
+                     map[formula.output_field] = [];
+                 }
+                 map[formula.output_field].push(formula);
+             }
+             return map;
+        }, {});
+    }
+
+    // --- Getters ---
+    getAllFields() {
+        return this._allFieldsData;
+    }
+
+    getAllFormulas() {
+        return this._allFormulasData;
+    }
+
+    getProducts() {
+        return this._productsData;
+    }
+
+    getTransactionItems() {
+        return this._transactionItemsData;
+    }
+
+    getBaseUrl() {
+        return this._baseUrl;
+    }
+
+    getMessage(key) {
+        return this._messages[key] || `[پیام برای کلید ${key} تعریف نشده است]`;
+    }
+
+    getCategoryBaseCategoryMap() {
+        return this._categoryIdToBaseCategory;
+    }
+
+     getAllProductGroups() {
+        return this._allProductGroups;
+    }
+
+    // تابعی برای یافتن پیکربندی یک فیلد بر اساس نام
+    getFieldConfigByName(fieldName) {
+        return this._fieldsByName[fieldName] || null;
+    }
+
+    // تابعی برای یافتن محصول بر اساس ID
+    getProductById(productId) {
+        // اطمینان از مقایسه عدد با عدد
+        const id = parseInt(productId);
+        if (isNaN(id)) return null;
+        return this._productsData.find(p => parseInt(p.id) === id);
+    }
+
+    // تابعی برای یافتن فیلدهای مرتبط با یک گروه خاص (استفاده بر اساس group در fields.json)
+    // اگر groupName === '__all_item_fields__'، همه فیلدهایی که دارای group هستند را برمی‌گرداند
+    getFieldsByGroup(groupName) {
+        if (groupName === '__all_item_fields__') {
+             // بازگرداندن همه فیلدهایی که یک گروه غیر خالی دارند
+             return this._groupedFields.concat(this._generalFields); // شامل فیلدهای عمومی هم بشود
+        }
+        const lowerGroupName = groupName ? groupName.toLowerCase() : '';
+         // فیلدهای گروه خاص به علاوه فیلدهای عمومی
+        return this._groupedFields.filter(field =>
+             field.group.toLowerCase() === lowerGroupName
+         ).concat(this._generalFields); // فیلدهای عمومی همیشه نمایش داده می‌شوند
+    }
+
+
+    // تابع کمکی برای یافتن فرمول‌های مرتبط با یک گروه/دسته‌بندی
+    // ورودی باید نام گروه پایه انگلیسی باشد (مانند melted, manufactured)
+    getFormulasByGroup(groupName) {
+         if (!groupName) {
+             console.warn("Attempted to get formulas for empty group name.");
+             return [];
+         }
+        const lowerGroupName = groupName.toString().trim().toLowerCase();
+
+        // فقط فرمول‌هایی را فیلتر کن که group آن‌ها با groupName مطابقت دارد
+        // و مربوط به فرم transactions/form.php هستند
+        const formulas = this._allFormulasData.filter(f =>
+             f.group &&
+             f.group.toString().trim().toLowerCase() === lowerGroupName &&
+             f.form === 'transactions/form.php'
+         );
+
+        //console.log(`Found ${formulas.length} formulas for group: ${groupName}`);
+        return formulas;
+    }
+
+    // تابع برای تعیین گروه اصلی محصول بر اساس داده محصول
+    // ورودی حتماً باید آبجکت محصول کامل باشد که از productsData آمده است
+    getCategoryGroup(productData) {
+        // Logging input data
+        // console.log('Determining category group for product data:', productData);
+
+        if (!productData) {
+             console.warn('getCategoryGroup received null or undefined productData');
+             return null;
+        }
+
+        const allGroups = this.getAllProductGroups();
+        const categoryCodeMap = this._categoryIdToBaseCategory; // استفاده از نگاشت بک‌اند
+
+        // 1. اولویت با خواندن مستقیم base_category از داده محصول
+        // این فیلد انتظار می‌رود که نام گروه پایه انگلیسی را از بک‌اند داشته باشد
+        if (productData.category?.base_category) {
+             const baseCategory = productData.category.base_category.toString().trim().toLowerCase();
+             // اطمینان حاصل کنیم که base_category خوانده شده در لیست گروه‌های شناخته شده ما هست
+             if (allGroups.includes(baseCategory)) {
+                 // console.log(`Direct base_category found in product category: ${baseCategory}`);
+                 return baseCategory;
+             } else {
+                  console.warn(`Direct base_category \"${baseCategory}\" from product category is not in recognized groups.`);
+             }
+        }
+
+        // اگر base_category مستقیم نبود، از category code یا category_id محصول استفاده کن
+        // و سعی کن با نگاشت بک‌اند یا تطابق مستقیم آن را به گروه تبدیل کنی
+        // از category?.code اولویت بیشتری دارد چون ممکن است کد رشته‌ای گروه باشد
+        const categoryIdentifier = productData.category?.code || productData.category_id;
+
+
+        if (!categoryIdentifier) {
+            console.warn('No category identifier (code or id) or base_category found in product data - returning null');
+            // Fallback to group property if present in product data (less reliable but maybe needed for old data)
+             if (productData.group) {
+                 const fallbackGroup = productData.group.toString().trim().toLowerCase();
+                 if (allGroups.includes(fallbackGroup)) {
+                     console.log(`Using fallback group from productData.group: ${fallbackGroup}`);
+                     return fallbackGroup;
+      } else {
+                      console.warn(`Fallback group \"${fallbackGroup}\" from productData.group is not in recognized groups.`);
+                 }
+             }
+            return null;
+        }
+
+        const normalizedIdentifier = categoryIdentifier.toString().trim().toLowerCase();
+
+        // 2. بررسی تطابق دقیق شناسه با گروه‌های موجود (اگر شناسه خودش نام گروه انگلیسی باشد)
+        // این حالت ممکن است برای product.category.code اتفاق بیفتد اگر کد همان نام گروه باشد
+        if (allGroups.includes(normalizedIdentifier)) {
+            // console.log(`Exact match found for identifier (as group name): ${normalizedIdentifier}`);
+            return normalizedIdentifier;
+        }
+
+        // 3. نگاشت کدهای عددی/رشته‌ای به گروه‌های پایه (استفاده از نگاشت window.categoryIdToBaseCategory از بک‌اند)
+        // این برای مواردی است که category_id یا category.code نیاز به نگاشت به base_category دارند
+        if (categoryCodeMap[normalizedIdentifier]) {
+            const mappedGroup = categoryCodeMap[normalizedIdentifier].toString().trim().toLowerCase();
+            // بررسی کنیم که آیا گروه نگاشت شده در لیست گروه‌های موجود است
+            if (allGroups.includes(mappedGroup)) {
+                 // console.log(`Mapped identifier ${normalizedIdentifier} to group: ${mappedGroup} using window.categoryIdToBaseCategory`);
+                 return mappedGroup;
+        } else {
+                console.warn(`Mapped group \"${mappedGroup}\" for identifier ${normalizedIdentifier} not found in recognized groups.`);
+            }
+        }
+
+        // 4. اگر هیچ تطابق معتبری پیدا نشد، null برگردان
+        console.warn(`No matching group found for identifier: ${categoryIdentifier} after all checks, returning null`);
+        return null;
+    }
+
+    // تابع برای دریافت فرمول‌های جمع اصلی (که group ندارند)
+    getSummaryFormulas() {
+        // فرمول‌هایی که group ندارند و مربوط به همین فرم هستند
+        return this._allFormulasData.filter(f => !f.group && f.form === 'transactions/form.php');
+    }
+
+    // تابع کمکی برای استخراج همه گروه‌های کالا به صورت داینامیک از فیلدها و فرمول‌ها
+    // این تابع اطمینان حاصل می‌کند که ما فقط گروه‌هایی را می‌شناسیم که فیلد یا فرمول مرتبط دارند.
+    _extractAllProductGroups() {
+      const groups = new Set();
+
+      // استخراج از فیلدها
+      this._allFieldsData.forEach(field => {
+        if (field.group) {
+          groups.add(field.group.toString().trim().toLowerCase());
+        }
+      });
+
+      // استخراج از فرمول‌ها
+      this._allFormulasData.forEach(formula => {
+        if (formula.group) {
+          groups.add(formula.group.toString().trim().toLowerCase());
+        }
+      });
+
+       // حذف گروه "همه" اگر وجود دارد، چون یک گروه محصول واقعی نیست
+      groups.delete('همه');
+
+
+      // اگر هیچ گروهی از فیلدها/فرمول‌ها پیدا نشد، از گروه‌های پیش‌فرض انگلیسی استفاده کن
+      // این یک حالت اضطراری است و نشان می‌دهد پیکربندی fields/formulas مشکل دارد
+      if (groups.size === 0) {
+         const defaultGroups = ['melted', 'manufactured', 'coin', 'jewelry', 'goldbullion', 'silverbullion'];
+         defaultGroups.forEach(group => groups.add(group));
+         console.warn("No product groups found in fields/formulas. Using default English groups:", defaultGroups);
+      }
+
+      const sortedGroups = Array.from(groups).sort();
+      console.log('All product groups from field/formula definitions:', sortedGroups);
+      return sortedGroups;
+    }
+
+    // اضافه کردن تابع getDefaultSettings
+    getDefaultSettings() {
+        // این تابع باید تنظیمات پیش فرض را از window.default_settings بخواند
+        // اگر این داده در window تزریق می‌شود.
+        return window.default_settings || {};
+    }
+
+}
+
+// --- Formula Calculation Engine ---
+// این کلاس مسئول اجرای فرمول‌ها بر اساس داده‌های ردیف‌ها و داده‌های کلی است.
+class FormulaEngine {
+    constructor(transactionData) {
+        if (!(transactionData instanceof TransactionData)) {
+            console.error("FormulaEngine requires an instance of TransactionData.");
+            throw new Error("Invalid TransactionData instance.");
+        }
+        this._data = transactionData;
+        console.log("FormulaEngine initialized.");
+    }
+
+    // اجرای یک فرمول برای یک ردیف مشخص
+    // rowData: یک آبجکت شامل نام فیلدها و مقادیر آن‌ها برای ردیف فعلی
+    // formula: آبجکت فرمول از allFormulasData
+    // selectedProduct: آبجکت محصول انتخاب شده در این ردیف (برای دسترسی به داده‌های محصول در فرمول)
+    // transactionData: آبجکت کلی transactionData برای دسترسی به سایر داده‌ها (اختیاری)
+    evaluateFormula(rowData, formula, selectedProduct, transactionData) {
+        if (!formula || !formula.formula || !formula.output_field || !formula.fields) {
+            console.warn("Skipping invalid formula:", formula);
+            return null; // یا یک مقدار خطای مناسب دیگر
+        }
+
+        // ساخت محیط اجرای فرمول
+        // متغیرهایی که در فرمول قابل دسترسی هستند، شامل:
+        // - مقادیر فیلدهای ردیف فعلی (بر اساس rowData)
+        // - مقادیر فیلدهای عمومی (مانند mazaneh_price)
+        // - مقادیر فیلدهای محصول انتخاب شده (مانند product_tax_enabled)
+        // - نتایج فرمول‌های پیش‌نیاز (اگر قبلاً محاسبه شده باشند)
+        // - توابع کمکی ریاضی (مثلاً round, max, min)
+        // - دسترسی به transactionData (برای توابع پیشرفته‌تر مثل sum)
+        const formulaScope = {
+            ...rowData, // مقادیر فیلدهای ردیف فعلی
+             // اضافه کردن فیلدهای عمومی از فرم اصلی (نیاز به دسترسی به TransactionUI یا خواندن مستقیم از DOM)
+             // برای سادگی در اینجا فقط مزنه را اضافه میکنیم، در FormulaService باید جامعتر باشد
+            mazaneh_price: parseFloat(document.getElementById('mazaneh_price')?.value || '0') || 0,
+            // اضافه کردن مقادیر فیلدهای محصول انتخاب شده
+            // فیلدهایی مانند product_tax_enabled, product_tax_rate, etc.
+            product_tax_enabled: selectedProduct?.tax_enabled ? 1 : 0,
+            product_tax_rate: parseFloat(selectedProduct?.tax_rate || '0') || 0,
+            product_vat_enabled: selectedProduct?.vat_enabled ? 1 : 0,
+            product_vat_rate: parseFloat(selectedProduct?.vat_rate || '0') || 0,
+            // اضافه کردن توابع ریاضی
+            round: Math.round,
+            ceil: Math.ceil,
+            floor: Math.floor,
+            abs: Math.abs,
+            max: Math.max,
+            min: Math.min,
+            // دسترسی به TransactionData برای توابع تجمعی
+            //transactionData: transactionData // فعلا غیرفعال نگه می‌داریم تا پیچیده نشود
+
+            // افزودن نتایج فرمول‌های پیش‌نیاز به scope
+            // این باید در FormulaService مدیریت شود که ترتیب اجرای فرمول‌ها را می‌داند
+        };
+
+         // اطمینان از اینکه مقادیر عددی به صورت عدد در scope قرار دارند
+        for (const fieldName of formula.fields) {
+            if (typeof formulaScope[fieldName] === 'string') {
+                const numValue = parseFloat(formulaScope[fieldName]);
+                 // اگر عدد معتبری است، آن را جایگزین کن، در غیر این صورت 0 قرار بده
+                formulaScope[fieldName] = isNaN(numValue) ? 0 : numValue;
+            } else if (typeof formulaScope[fieldName] !== 'number') {
+                 // اگر نه رشته است و نه عدد (مثلاً undefined)، آن را 0 قرار بده
+                 formulaScope[fieldName] = 0;
+            }
+             // اطمینان از bool به number برای فیلدهای enable مالیات
+             if (fieldName === 'product_tax_enabled' || fieldName === 'product_vat_enabled') {
+                 formulaScope[fieldName] = formulaScope[fieldName] ? 1 : 0;
+             }
+        }
+
+
+        try {
+            // ایجاد یک تابع از رشته فرمول برای اجرا
+            // از 'with' برای ایجاد یک Scope موقت استفاده می‌کنیم (توجه: استفاده از with توصیه نمی‌شود و در strict mode ممنوع است)
+            // یک راه حل بهتر، ساخت یک آبجکت scope و دسترسی صریح به properties آن در رشته فرمول است،
+            // اما این نیاز به پارس کردن پیچیده‌تر رشته فرمول دارد.
+            // فرض می‌کنیم که فرمول‌ها امن هستند و توسط مدیر سیستم تعریف شده‌اند.
+            const formulaFunc = new Function('scope', `with(scope) { return ${formula.formula}; }`);
+            let result = formulaFunc(formulaScope);
+
+            // اگر نتیجه NaN یا Infinity بود، آن را 0 در نظر بگیرید
+             if (isNaN(result) || !isFinite(result)) {
+                 result = 0;
+             }
+
+             // اگر output_field یک فیلد عددی است، نتیجه را گرد کن (مثلاً 2 رقم اعشار)
+             // نیاز به دسترسی به تعریف فیلد در TransactionData داریم
+             const outputFieldConfig = this._data.getFieldConfigByName(formula.output_field);
+             if (outputFieldConfig?.is_numeric) {
+                  // تعداد ارقام اعشار می‌تواند بر اساس نوع فیلد یا تنظیمات تعیین شود
+                  // فعلاً 4 رقم اعشار برای فیلدهای عددی خروجی فرمول در نظر گرفته می‌شود
+                 result = parseFloat(result.toFixed(4)); // گرد کردن به 4 رقم اعشار
+             }
+
+
+            // console.log(`Formula ${formula.name} (${formula.formula}) calculated for row, result: ${result}`, {formulaScope});
+            return result;
+        } catch (e) {
+            console.error(`Error evaluating formula ${formula.name} (${formula.formula}) for row:`, { rowData, formula, selectedProduct, error: e });
+            return 0; // در صورت خطا، 0 برگردان
+        }
+    }
+
+    // محاسبه همه فرمول‌های یک ردیف خاص بر اساس گروه
+    // container: المان HTML ردیف
+    // mainGroup: گروه اصلی محصول این ردیف (انگلیسی)
+    // currentIndex: ایندکس ردیف
+    // selectedProduct: آبجکت کامل محصول این ردیف
+    calculateRow(container, mainGroup, currentIndex, selectedProduct) {
+        //console.log(`Calculating formulas for row ${currentIndex}, group: ${mainGroup}`);
+        if (!container || !mainGroup || !selectedProduct) {
+            //console.warn(`Skipping row calculation due to missing data:`, {container, mainGroup, selectedProduct});
+            // در صورت عدم انتخاب محصول یا عدم تعیین گروه، فیلدهای محاسبه شده را صفر کن
+            $(container).find('.item-field[data-field-name]').each(function() {
+                 const $field = $(this);
+                 const fieldName = $field.data('field-name');
+                 const fieldConfig = this._data.getFieldConfigByName(fieldName);
+                 // فقط فیلدهای محاسبه شده یا فقط خواندنی را صفر کن
+                 if(fieldConfig && (fieldConfig.calculated || fieldConfig.autonumeric_readonly)) {
+                      if (typeof $.fn.autoNumeric !== 'undefined' && ($field.hasClass('autonumeric') || $field.hasClass('autonumeric-readonly'))) {
+                          $field.autoNumeric('set', 0); // استفاده از set برای AutoNumeric
+                      } else {
+                           $field.val(0); // یا ''
+                      }
+                 }
+            }.bind(this)); // Bind this to access _data
+            return; // Stop if no product is selected or group is unknown
+        }
+
+        const formulas = this._data.getFormulasByGroup(mainGroup);
+        //console.log(`Found ${formulas.length} formulas for group ${mainGroup}`);
+
+        if (formulas.length === 0) {
+             //console.log(`No formulas defined for group ${mainGroup}.`);
+             // اگر فرمولی نیست، فیلدهای محاسبه شده قبلی را صفر کن
+              $(container).find('.item-field[data-field-name]').each(function() {
+                 const $field = $(this);
+                 const fieldName = $field.data('field-name');
+                  const fieldConfig = this._data.getFieldConfigByName(fieldName);
+                   if(fieldConfig && (fieldConfig.calculated || fieldConfig.autonumeric_readonly)) {
+                       if (typeof $.fn.autoNumeric !== 'undefined' && ($field.hasClass('autonumeric') || $field.hasClass('autonumeric-readonly'))) {
+                          $field.autoNumeric('set', 0); // استفاده از set برای AutoNumeric
+                      } else {
+                           $field.val(0); // یا ''
+                      }
+                   }
+             }.bind(this)); // Bind this to access _data
+
+             return;
+        }
+
+        // جمع آوری داده‌های ورودی برای فرمول‌های این ردیف
+        // این تابع باید حتی فیلدهایی که هنوز render نشده‌اند را با مقدار پیش‌فرض (0 یا '') برگرداند
+        const rowData = this._collectRowData(container, currentIndex, mainGroup);
+        //console.log(`Collected row data for row ${currentIndex}:`, rowData);
+
+        // اجرای فرمول‌ها به ترتیبی که تعریف شده‌اند
+        const calculatedValues = {};
+        const formulaResults = {}; // برای نگهداری نتایج موقت جهت استفاده در فرمول‌های بعدی همان ردیف
+
+        for (const formula of formulas) {
+            //console.log(`Executing formula: ${formula.name}`);
+            // برای اجرای فرمول، نیاز داریم به مقادیر فیلدهایی که در `formula.fields` تعریف شده‌اند.
+            // این مقادیر ممکن است از rowData یا نتایج فرمول‌های قبلی (در formulaResults) باشند.
+            // همچنین ممکن است نیاز به فیلدهای عمومی (مثل mazaneh_price) یا فیلدهای محصول (مالیات) داشته باشند.
+
+            // ساخت scope برای این فرمول
+            const currentScope = {
+                ...rowData, // مقادیر فیلدهای جمع آوری شده از DOM (که شامل فیلدهای پیش‌فرض هم می‌شود)
+                ...formulaResults, // نتایج فرمول‌های قبلی در همین ردیف
+                 // اطمینان از گرفتن مقدار mazaneh_price به صورت عددی
+                 mazaneh_price: parseFloat($('#mazaneh_price').autoNumeric('get') || $('#mazaneh_price').val() || '0') || 0,
+                 // اضافه کردن مقادیر فیلدهای محصول انتخاب شده
+                product_tax_enabled: selectedProduct?.tax_enabled ? 1 : 0,
+                product_tax_rate: parseFloat(selectedProduct?.tax_rate || '0') || 0,
+                product_vat_enabled: selectedProduct?.vat_enabled ? 1 : 0,
+                product_vat_rate: parseFloat(selectedProduct?.vat_rate || '0') || 0,
+                 // توابع ریاضی
+                round: Math.round,
+                ceil: Math.ceil,
+                floor: Math.floor,
+                abs: Math.abs,
+                max: Math.max,
+                min: Math.min,
+            };
+
+             // اطمینان از اینکه تمام dependencies فرمول در scope به صورت عددی هستند (مجدداً چک می‌شود)
+             // این بخش شاید لازم نباشد اگر _collectRowData مقادیر پیش‌فرض عددی برای فیلدهای عددی بدهد
+             // اما برای اطمینان بیشتر نگه می‌داریم، با این تفاوت که از rowData می‌خوانیم نه مستقیماً از DOM
+             for(const depField of formula.fields) {
+                 if (currentScope[depField] === undefined) {
+                     // اگر به دلیلی فیلد در rowData (که از _collectRowData می‌آید) نبود، آن را 0 قرار بده
+                     currentScope[depField] = 0;
+                     // console.warn(`Dependency field "${depField}" for formula "${formula.name}" not found in row data (after _collectRowData). Setting to 0.`);
+                 } else {
+                      // اطمینان از تبدیل به عدد برای dependencies
+                     if (typeof currentScope[depField] === 'string') {
+                          const numValue = parseFloat(currentScope[depField]);
+                          currentScope[depField] = isNaN(numValue) ? 0 : numValue;
+                     } else if (typeof currentScope[depField] !== 'number') {
+                          currentScope[depField] = 0;
+                     }
+                 }
+
+                 // بررسی boolean برای فیلدهای enable مالیات محصول (اگرچه از selectedProduct می‌آیند ولی برای اطمینان)
+                 if (depField === 'product_tax_enabled' || depField === 'product_vat_enabled') {
+                      currentScope[depField] = currentScope[depField] ? 1 : 0;
+                 }
+
+             }
+
+
+            try {
+                 // اجرای فرمول با scope آماده شده
+                 const formulaFunc = new Function('scope', `with(scope) { return ${formula.formula}; }`);
+                 let result = formulaFunc(currentScope);
+
+                 if (isNaN(result) || !isFinite(result)) {
+                     result = 0;
+                 }
+
+                 // اگر output_field یک فیلد عددی است، نتیجه را گرد کن
+                 const outputFieldConfig = this._data.getFieldConfigByName(formula.output_field);
+                 if (outputFieldConfig?.is_numeric) {
+                      result = parseFloat(result.toFixed(4)); // گرد کردن به 4 رقم اعشار
+                 }
+
+
+                calculatedValues[formula.output_field] = result;
+                formulaResults[formula.output_field] = result; // ذخیره نتیجه برای فرمول‌های بعدی
+
+                // نمایش نتیجه در فیلد مربوطه
+                const outputElement = container.querySelector(`[data-field-name="${formula.output_field}"][data-index="${currentIndex}"]`);
+                if (outputElement) {
+                     if ($(outputElement).hasClass('autonumeric-readonly') || $(outputElement).hasClass('autonumeric')) {
+                        // برای فیلدهای autonumeric از متد set استفاده کنید
+                         $(outputElement).autoNumeric('set', result);
+      } else {
+                         outputElement.value = result;
+                     }
+                      // trigger change event if needed by other listeners (like summary update)
+                      $(outputElement).trigger('change');
+                } else {
+                    // console.warn(`Output field "${formula.output_field}" for formula "${formula.name}" not found in row ${currentIndex}.`);
+                }
+
+            } catch (e) {
+                console.error(`Error evaluating formula "${formula.name}" for row ${currentIndex}:`, { formula: formula.formula, scope: currentScope, error: e });
+                 // در صورت خطا، فیلد خروجی را خالی یا صفر کن
+                const outputElement = container.querySelector(`[data-field-name="${formula.output_field}"][data-index="${currentIndex}"]`);
+                 if (outputElement) {
+                     if ($(outputElement).hasClass('autonumeric-readonly') || $(outputElement).hasClass('autonumeric')) {
+                         $(outputElement).autoNumeric('set', 0);
+                     } else {
+                         outputElement.value = ''; // یا 0
+                     }
+                      $(outputElement).trigger('change'); // Trigger change event
+                 }
+                 formulaResults[formula.output_field] = 0; // مقدار نتیجه را برای فرمول‌های بعدی 0 قرار بده
+            }
+        }
+
+        //console.log(`Finished calculating formulas for row ${currentIndex}.`);
+    }
+
+     // محاسبه فرمول‌های خلاصه
+     // allRowData: آرایه‌ای از آبجکت‌های داده برای تمام ردیف‌ها (خروجی _collectAllItemRowData)
+    calculateSummary(allRowData) {
+        //console.log("Calculating summary formulas...");
+        const summaryFormulas = this._data.getSummaryFormulas();
+        const summaryValues = {};
+        const summaryScope = {}; // Scope for summary formulas
+
+         // 1. جمع آوری و تجمیع داده‌های لازم از تمام ردیف‌ها
+         // فیلدهایی که در فرمول‌های خلاصه به عنوان dependency آمده‌اند را پیدا می‌کنیم
+         const fieldsNeededInSummary = new Set();
+         summaryFormulas.forEach(sf => {
+             (sf.dependencies || []).forEach(dep => fieldsNeededInSummary.add(dep));
+         });
+
+         //console.log("Fields needed for summary:", Array.from(fieldsNeededInSummary));
+
+         // مقدار دهی اولیه Scope با 0 برای فیلدهای عددی مورد نیاز در خلاصه
+         fieldsNeededInSummary.forEach(fieldName => {
+              const fieldConfig = this._data.getFieldConfigByName(fieldName);
+              // اگر فیلد در تعریف فیلدها پیدا شد و عددی بود، با 0 مقدار دهی اولیه کن
+              // یا اگر نام آن شبیه فیلدهای تجمیعی است (مثل sum_...)
+              if (fieldConfig?.is_numeric || fieldName.startsWith('sum_') || fieldName.startsWith('total_')) {
+                 summaryScope[fieldName] = 0;
+              } else {
+                  // برای فیلدهای غیر عددی یا نامشخص، مقدار دهی اولیه مناسب (مثلا '' یا [])
+                  summaryScope[fieldName] = ''; // یا []; بسته به نوع استفاده در فرمول‌های خلاصه
+              }
+         });
+          // اضافه کردن تعداد ردیف‌ها اگر در فرمول‌ها استفاده می‌شود
+         summaryScope.item_row_count = allRowData.length;
+
+
+         // تجمیع مقادیر فیلدها از تمام ردیف‌ها
+         allRowData.forEach(rowData => {
+             fieldsNeededInSummary.forEach(fieldName => {
+                  const fieldConfig = this._data.getFieldConfigByName(fieldName);
+                 // اگر فیلد عددی است (بر اساس تعریف یا نام تجمیعی) مقدار آن را جمع کن
+                 if (fieldConfig?.is_numeric || fieldName.startsWith('sum_') || fieldName.startsWith('total_')) {
+                      const rowFieldValue = parseFloat(rowData[fieldName]) || 0; // مقدار فیلد در این ردیف
+                      summaryScope[fieldName] += rowFieldValue; // جمع کردن
+                 } else {
+                     // برای فیلدهای غیر عددی که در خلاصه نیازند، منطق تجمیع ممکن است متفاوت باشد
+                     // مثلاً اضافه کردن به آرایه یا صرفاً گرفتن مقدار از ردیف آخر
+                     // برای سادگی فعلاً فقط جمع عددی را انجام می‌دهیم
+                 }
+             });
+         });
+
+         //console.log("Aggregated data for summary scope:", summaryScope);
+
+
+         // 2. اجرای فرمول‌های خلاصه
+         const summaryFormulaResults = {};
+         summaryFormulas.forEach(formula => {
+             if (formula.expression && formula.name) {
+                 // ساخت scope برای این فرمول خلاصه (شامل تجمیع داده‌ها و نتایج فرمول‌های خلاصه قبلی)
+                 const currentSummaryScope = {
+                     ...summaryScope, // داده‌های تجمیع شده
+                     ...summaryFormulaResults, // نتایج فرمول‌های خلاصه قبلی
+                     // توابع کمکی برای خلاصه (مثلاً sum Array)
+                      sum: (arr) => Array.isArray(arr) ? arr.reduce((a, b) => a + (parseFloat(b) || 0), 0) : (parseFloat(arr) || 0)
+                 };
+
+                  // اطمینان از اینکه تمام dependencies فرمول در scope به صورت عددی هستند
+                 let canExecute = true;
+                 for(const depField of formula.fields) {
+                      if (currentSummaryScope[depField] === undefined) {
+                           console.warn(`Dependency field "${depField}" for summary formula "${formula.name}" not found in summary scope. Cannot execute.`);
+                           canExecute = false;
+                           break; // Stop checking dependencies for this formula
+                      }
+                      // اطمینان از تبدیل به عدد برای dependencies
+                      if (typeof currentSummaryScope[depField] === 'string') {
+                           const numValue = parseFloat(currentSummaryScope[depField]);
+                           currentSummaryScope[depField] = isNaN(numValue) ? 0 : numValue;
+                      } else if (typeof currentSummaryScope[depField] !== 'number') {
+                           currentSummaryScope[depField] = 0;
+                      }
+                 }
+
+
+                 if (canExecute) {
+                      try {
+                           const formulaFunc = new Function('scope', `with(scope) { return ${formula.expression}; }`);
+                           let result = formulaFunc(currentSummaryScope);
+
+                           if (isNaN(result) || !isFinite(result)) {
+                               result = 0;
+                           }
+
+                            // گرد کردن نتیجه اگر فیلد خروجی عددی است
+                            const outputFieldConfig = this._data.getFieldConfigByName(formula.name); // نام فرمول خروجی را در فیلد با همان نام نمایش می‌دهد
+                            if (outputFieldConfig?.is_numeric) {
+                                result = parseFloat(result.toFixed(4)); // گرد کردن به 4 رقم اعشار
+                            }
+
+
+                           summaryValues[formula.name] = result; // نام فرمول معمولا با نام فیلد خروجی خلاصه یکی است
+                           summaryFormulaResults[formula.name] = result; // ذخیره نتیجه برای فرمول‌های خلاصه بعدی
+                           //console.log(`Summary Formula ${formula.name} (${formula.expression}) calculated, result: ${result}`);
+
+                       } catch (e) {
+                           console.error(`Error evaluating summary formula "${formula.name}" (${formula.expression}):`, { scope: currentSummaryScope, error: e });
+                           summaryValues[formula.name] = 0;
+                           summaryFormulaResults[formula.name] = 0;
+                       }
+                 } else {
+                     summaryValues[formula.name] = 0;
+                     summaryFormulaResults[formula.name] = 0;
+                 }
+             }
+         });
+
+
+        // 3. به روز رسانی UI با مقادیر محاسبه شده خلاصه
+         this._updateSummaryUI(summaryValues);
+        //console.log("Summary calculation complete.");
+    }
+
+
+     _updateSummaryUI(summaryValues) {
+         for (const fieldName in summaryValues) {
+             // فیلدهای نمایش خلاصه در HTML باید ID مانند summary-fieldName داشته باشند
+             const displayElement = $(`#summary-${fieldName}`);
+             if (displayElement.length) {
+                 let formattedValue = summaryValues[fieldName];
+                 // Find the corresponding field definition to check if it's numeric and needs formatting
+                 const fieldConfig = this._data.getFieldConfigByName(fieldName);
+
+                 if (fieldConfig && fieldConfig.is_numeric) {
+                      // Use AutoNumeric for formatting if available and needed
+                      if (typeof $.fn.autoNumeric !== 'undefined') {
+                          // Create a temporary AutoNumeric instance to get formatted value
+                          // Need to ensure the temporary element is detached or handled correctly
+                          const tempInput = $('<input type="hidden">').val(formattedValue);
+                          // Use options from field definition if available, otherwise basic
+                          // Summary fields might have their own display format options
+                          const autonumericOptions = fieldConfig.autonumeric_options || { digitGroupSeparator: '٬', decimalCharacter: '.', numberOfDecimals: 0 }; // Default options for summary display
+
+                          try {
+                             tempInput.autoNumeric('init', autonumericOptions);
+                             formattedValue = tempInput.autoNumeric('getFormatted');
+                             tempInput.autoNumeric('destroy'); // Clean up
+                             tempInput.remove();
+                          } catch (e) {
+                             console.error('Error formatting summary value with AutoNumeric:', fieldName, formattedValue, e);
+                             // Fallback to basic formatting or raw value on error
+                             formattedValue = summaryValues[fieldName].toLocaleString('fa-IR'); // Basic fallback
+                          }
+
+                      } else {
+                          // Basic toLocaleString fallback
+                          formattedValue = summaryValues[fieldName].toLocaleString('fa-IR');
+                      }
+                 } else if (typeof formattedValue === 'number') {
+                     // اگر فیلد در تعریف فیلدها نبود ولی مقدار عددی بود، به صورت پیش‌فرض فرمت کن
+                      if (typeof $.fn.autoNumeric !== 'undefined') {
+                           const tempInput = $('<input type="hidden">').val(formattedValue);
+                           const autonumericOptions = { digitGroupSeparator: '٬', decimalCharacter: '.', numberOfDecimals: 0 };
+                            try {
+                                tempInput.autoNumeric('init', autonumericOptions);
+                                formattedValue = tempInput.autoNumeric('getFormatted');
+                                tempInput.autoNumeric('destroy');
+                                tempInput.remove();
+                            } catch (e) {
+                                formattedValue = formattedValue.toLocaleString('fa-IR');
+                            }
+
+                      } else {
+                          formattedValue = formattedValue.toLocaleString('fa-IR');
+                      }
+                 }
+                 // For non-numeric values, just display the value as is
+                 displayElement.text(formattedValue);
+
+             } else {
+                 // console.warn(`Summary display element with ID "summary-${fieldName}" not found.`);
+             }
+         }
+     }
+}
+
+
+// --- User Interface Handling ---
+// این کلاس مسئول تعامل با DOM، رندر کردن ردیف‌ها و فیلدها، و مدیریت eventها است.
+class TransactionUI {
+    constructor(data, formulaEngine) {
+        if (!(data instanceof TransactionData)) {
+            console.error("TransactionUI requires an instance of TransactionData.");
+            throw new Error("Invalid TransactionData instance.");
+        }
+         if (!(formulaEngine instanceof FormulaEngine)) {
+            console.error("TransactionUI requires an instance of FormulaEngine.");
+            throw new Error("Invalid FormulaEngine instance.");
+        }
+
+        this._data = data; // Reference to TransactionData instance
+        this._formulaEngine = formulaEngine; // Reference to FormulaEngine instance
+
+        // DOM elements
+        this._$form = $('#transactionForm');
+        this._$itemsContainer = $('#transactionItemsContainer');
+        this._$addItemButton = $('#addItemRowButton');
+        this._$itemTemplate = $('#templateItemRow');
+         this._$summaryFieldsContainer = $('#summaryFields'); // Container for summary fields
+         this._$formMessagesContainer = $('#formMessages'); // Container for form-level messages
+
+
+        // تعداد فعلی ردیف‌های آیتم در فرم (برای مدیریت indexها و نام فیلدها)
+        // در حالت افزودن، 0 شروع می‌شود. در حالت ویرایش، بر اساس تعداد آیتم‌های موجود.
+        this._itemCount = 0; // این را با تعداد آیتم‌های موجود initialize خواهیم کرد
+
+         console.log('TransactionUI initialized.');
+    }
+
+    // Initial form setup
+    initializeForm() {
+        console.log('Initializing form...');
+        this._loadExistingItems();
+        this._initializeAllAutonumerics();
+        this._initializeAllSelect2(); // Initialize Select2 for all selects after loading items/rows
+         this._initializeDatepickers(); // Initialize datepickers for date fields
+
+         // بارگذاری لیست آزمایشگاه‌ها پس از initialize شدن فرم
+         this._loadAssayOffices();
+
+        console.log('Form initialization complete.');
+
+         // پس از initialize شدن کامل فرم (لود آیتم‌ها و initialize شدن فیلدها)،
+         // نیاز داریم محاسبات اولیه را انجام دهیم (برای حالت ویرایش)
+         this.recalculateAllRows();
+         this.updateSummaryFields();
+    }
+
+    // Load existing transaction items into the form (for edit mode)
+    _loadExistingItems() {
+        const existingItems = this._data.getTransactionItems();
+        console.log(`Loading ${existingItems.length} existing items.`);
+        if (existingItems.length > 0) {
+            existingItems.forEach(itemData => {
+                this.renderItemRow(itemData, this._itemCount++); // از _itemCount برای index استفاده کن
+            });
+        } else {
+            console.log('No existing items found. Adding an empty row.');
+            this.addNewEmptyItemRow(); // اضافه کردن اولین ردیف خالی در حالت افزودن
+        }
+         // پس از لود شدن یا اضافه شدن آیتم‌ها، _itemCount به تعداد کل ردیف‌ها تنظیم شده است
+         console.log(`Total item rows after loading: ${this._itemCount}`);
+    }
+
+     // Render a single item row using the template and data
+    renderItemRow(itemData = null, index) {
+        console.log('Rendering item row for index:', index, 'Data:', itemData ? {...itemData} : null);
+
+        const templateHtml = this._$itemTemplate.html();
+        if (!templateHtml) {
+            console.error('Item row template not found.');
+            return null;
+        }
+
+        // Replace placeholder index {index} with the actual index
+        let rowHtml = templateHtml.replace(/\{index\}/g, index);
+
+        const $row = $(rowHtml);
+        $row.attr('data-index', index); // Add data-index attribute to the row element
+
+        // Append the new row to the container
+        this._$itemsContainer.append($row);
+
+        // Fill the product select dropdown
+        const $productSelect = $row.find('.product-select');
+        this._fillProductSelect($productSelect, itemData ? itemData.product_id : null);
+
+        // اگر itemData provided شده (حالت ویرایش)، فیلدهای ردیف را با داده‌های موجود پر کن و فیلدهای داینامیک را رندر کن
+        if (itemData && itemData.product_id) {
+            // برای رندر فیلدهای داینامیک و پر کردن آن‌ها، نیاز داریم محصول و گروه آن را بدانیم
+            const selectedProduct = this._data.getProductById(itemData.product_id);
+            if (selectedProduct) {
+                const mainGroup = this._data.getCategoryGroup(selectedProduct);
+                if (mainGroup) {
+                     // رندر فیلدهای داینامیک برای گروه و پر کردن با itemData
+                    this._renderDynamicFields($row, index, mainGroup, itemData);
+                    // پس از رندر فیلدهای داینامیک، فیلدهای عمومی را که همیشه در ردیف تمپلیت هستند نیز با itemData پر کن
+                     this._fillGeneralRowFields($row, itemData, index);
+
+                } else {
+                     console.warn(`Could not determine group for product ID ${itemData.product_id} for existing item at index ${index}. Cannot render dynamic fields.`);
+                     const $dynamicFieldsContainer = $row.find(`.dynamic-fields-row`);
+                     $dynamicFieldsContainer.html('<div class="col-12"><div class="alert alert-danger">گروه کالا مشخص نیست.</div></div>');
+                      // با این حال، فیلدهای عمومی را که در تمپلیت هستند را پر کن
+                     this._fillGeneralRowFields($row, itemData, index);
+                }
+            } else {
+                 console.warn(`Product with ID ${itemData.product_id} not found for existing item at index ${index}. Cannot fill row data.`);
+                 const $dynamicFieldsContainer = $row.find(`.dynamic-fields-row`);
+                 $dynamicFieldsContainer.html('<div class="col-12"><div class="alert alert-danger">اطلاعات محصول یافت نشد.</div></div>');
+                  // فیلدهای عمومی را هم پاک کن یا با مقادیر پیش‌فرض پر کن
+                 this._fillGeneralRowFields($row, {}, index); // ارسال آبجکت خالی برای پاک کردن
+            }
+        } else {
+             // اگر itemData نیست (ردیف خالی جدید)، فیلدهای عمومی را هم خالی کن
+             this._fillGeneralRowFields($row, {}, index);
+        }
+
+
+        // Initialize AutoNumeric and Select2 for the newly rendered row elements
+         this._initializeAutonumericsForRow(index);
+         this._initializeSelect2ForRow(index);
+         this._initializeDatepickers($row); // Initialize datepickers in this row
+
+        // Attach event listeners specifically for this new row
+        this._attachRowEventListeners($row, index); // Event listeners now use delegation
+
+        // Return the new row element
+        return $row;
+    }
+
+     // پر کردن فیلدهای عمومی یک ردیف (آن‌هایی که در تمپلیت اصلی هستند و دینامیک نیستند)
+     _fillGeneralRowFields($row, itemData, index) {
+         // فیلدهای عمومی در ردیف آیتم تمپلیت (مانند product_id)
+         const generalFieldsInRow = this._data.getFieldsByGroup('همه').filter(field => field.group !== 'همه'); // فیلدهایی با group خالی یا تعریف نشده
+
+         generalFieldsInRow.forEach(fieldConfig => {
+             const fieldName = fieldConfig.name;
+             // از itemData مقدار متناظر را بخوان
+             const fieldValue = itemData.hasOwnProperty(fieldName) ? itemData[fieldName] : '';
+             const $fieldElement = $row.find(`[data-field-name="${fieldName}"][data-index="${index}"]`);
+
+             if ($fieldElement.length) {
+                 // برای فیلدهای Autonumeric از set استفاده کن
+                 if ($fieldElement.hasClass('autonumeric') || $fieldElement.hasClass('autonumeric-readonly')) {
+                      // اطمینان از تبدیل مقدار به عدد قبل از set
+                      $fieldElement.autoNumeric('set', parseFloat(fieldValue) || 0);
+                 } else {
+                      // برای سایر فیلدها، value را مستقیم set کن
+                      $fieldElement.val(fieldValue);
+                 }
+                  // trigger change event if needed
+                 // $fieldElement.trigger('change');
+             }
+         });
+
+          // فیلد product_id به صورت جداگانه در _fillProductSelect پر می‌شود
+     }
+
+
+    // Fill the product select dropdown with options
+    _fillProductSelect(selectElement, selectedId = null) {
+        const $select = $(selectElement);
+        if ($select.length === 0) return;
+
+        $select.empty(); // Clear existing options
+        $select.append('<option value="">انتخاب کالا...</option>'); // Add default option
+
+        // Use product data from the data layer
+        if (Array.isArray(this._data.getProducts())) {
+            this._data.getProducts().forEach(product => {
+                const productGroup = this._data.getCategoryGroup(product); // Get the base group
+                 // نام محصول را از فیلد product.name بخوانید
+                 const productName = product.name || `محصول ${product.id}`; // Fallback name
+                const option = $(`<option value="${product.id}"></option>`)
+                    .text(productName) // Display product name
+                    .attr('data-group', productGroup || '') // Add data-group attribute
+                    .attr('data-code', product.code || ''); // Add data-code attribute
+
+                // Select the option if it matches the selectedId
+                if (selectedId !== null && product.id == selectedId) {
+                    option.attr('selected', 'selected');
+                }
+
+                $select.append(option);
+            });
+        }
+
+        // Initialize Select2 after filling options (handled by delegation now, but explicit init on element is safer after fill)
+         // This might be redundant if Select2 is initialized globally or by row, but useful if fill happens later.
+        if (typeof $.fn.select2 !== 'undefined') {
+            $select.select2({
+                theme: 'bootstrap-5', // Assuming Bootstrap 5 theme is available
+                placeholder: $select.find('option:first').text() || 'انتخاب کنید',
+                allowClear: true, // Optional: add a clear button
+                width: 'resolve' // Automatically adjust width
+            });
+             // Set initial selected value if needed
+            if (selectedId !== null) {
+                 $select.val(selectedId).trigger('change'); // Trigger change to update Select2 UI
+            }
+        } else {
+             console.warn('Select2 plugin not found during _fillProductSelect.');
+             // Set initial selected value for standard select
+             if (selectedId !== null) {
+                 $select.val(selectedId);
+             }
+        }
+
+
+        console.log(`Filled product select for row. Selected ID: ${selectedId}. Group: ${this._data.getCategoryGroup(this._data.getProductById(selectedId))}`);
+    }
+
+     // Render dynamic fields based on the selected product's group
+     _renderDynamicFields($row, index, mainGroup, itemData = {}) {
+         const $dynamicFieldsContainer = $row.find(`.dynamic-fields-row[id="dynamic-fields-${index}"]`); // پیدا کردن کانتینر بر اساس id
+         if ($dynamicFieldsContainer.length === 0) {
+             console.error(`Dynamic fields container with ID "dynamic-fields-${index}" not found for row index ${index}.`);
+             return;
+         }
+
+         $dynamicFieldsContainer.empty(); // Clear existing dynamic fields
+
+         // فقط فیلدهایی که group مشخص دارند و group آنها با mainGroup یکی است
+         const fieldsToRender = this._data.getAllFields().filter(field =>
+             field.group && field.group.toLowerCase() === mainGroup.toLowerCase() && field.form === 'transactions/form.php'
+         );
+
+
+         if (fieldsToRender.length === 0) {
+             $dynamicFieldsContainer.html('<div class="col-12"><div class="alert alert-info">فیلدهای خاصی برای این گروه کالا تعریف نشده است.</div></div>');
+             return;
+         }
+
+         fieldsToRender.forEach(field => {
+             const fieldName = field.name;
+             const fieldLabel = field.label || fieldName;
+             const fieldType = field.type || 'text';
+             // استفاده از مقدار موجود در itemData یا مقدار پیش‌فرض field
+             const fieldValue = itemData.hasOwnProperty(fieldName) ? itemData[fieldName] : (field.default_value ?? '');
+             const fieldRequired = (field.required ?? false) ? 'required' : '';
+             const isNumeric = field.is_numeric ?? false;
+              const isCalculated = field.calculated ?? false; // جدید: مشخص کردن فیلدهای محاسبه شده
+              const isReadonly = field.readonly ?? false; // جدید: مشخص کردن فیلدهای فقط خواندنی
+              const isAutonumericReadonly = field.autonumeric_readonly ?? false; // جدید: مشخص کردن فیلدهای فقط خواندنی autonumeric
+             const colClass = field.col_class || 'col-md-3'; // Default column class
+
+             let inputHtml = '';
+             const fieldId = `${fieldName}-${index}`; // Unique ID for each field element
+
+             // Determine common attributes
+             let commonAttrs = `id="${fieldId}" name="items[${index}][${fieldName}]" class="form-control item-field" data-field-name="${fieldName}" data-index="${index}"`;
+
+             // اضافه کردن کلاس‌های مربوط به نوع فیلد (عددی، فقط خواندنی)
+             if (isNumeric) commonAttrs += ' is-numeric';
+              if (isCalculated || isReadonly || isAutonumericReadonly) {
+                  commonAttrs += ' form-control-plaintext'; // کلاس برای نمایش متن ساده
+                  if (!isAutonumericReadonly) commonAttrs += ' readonly'; // readonly HTML attribute
+              }
+              if (isAutonumericReadonly) commonAttrs += ' autonumeric-readonly'; // کلاس برای autonumeric فقط خواندنی
+              if (isNumeric && !isAutonumericReadonly) commonAttrs += ' autonumeric'; // کلاس برای autonumeric ورودی
+
+             // اضافه کردن required attribute
+              if (fieldRequired && !isCalculated && !isReadonly && !isAutonumericReadonly) { // فیلدهای محاسبه شده/فقط خواندنی نباید required باشند
+                  commonAttrs += ' required';
+              }
+
+
+              // Add AutoNumeric options if numeric and not readonly plaintext
+             if (isNumeric && !isAutonumericReadonly && typeof $.fn.autoNumeric !== 'undefined') {
+                  // Pass specific AutoNumeric options if defined in field config
+                  const autonumericOptions = field.autonumeric_options ? JSON.stringify(field.autonumeric_options) : '{"digitGroupSeparator": "٬", "decimalCharacter": ".", "numberOfDecimals": 4}'; // Default options
+                 commonAttrs += ` data-autonumeric-options='${autonumericOptions}'`;
+             } else if (isAutonumericReadonly && typeof $.fn.autoNumeric !== 'undefined') {
+                  // Options for readonly autonumeric (display only)
+                  const autonumericOptions = field.autonumeric_options ? JSON.stringify(field.autonumeric_options) : '{"digitGroupSeparator": "٬", "decimalCharacter": ".", "numberOfDecimals": 4, "readOnly": true, "noEventListeners": true}';
+                  commonAttrs += ` data-autonumeric-options='${autonumericOptions}'`;
+                  // Note: The 'readonly' HTML attribute might still be useful depending on styling
+              }
+
+
+              // Handle initial value (especially for autonumeric fields when loading existing data)
+             // For input/textarea, value attribute or inner text will be set after element creation
+              let initialValue = itemData.hasOwnProperty(fieldName) ? itemData[fieldName] : (field.default_value ?? '');
+
+
+             switch (fieldType) {
+                 case 'select':
+                      // Source for select options can be static options in field definition or a data source URL (e.g., assay_offices)
+                      const dataSource = field.source || null;
+                     inputHtml = `<select ${commonAttrs}>`;
+                     inputHtml += '<option value="">انتخاب کنید...</option>'; // Default empty option
+                      if (dataSource) {
+                          // Options will be loaded dynamically later (e.g., by _loadAssayOffices)
+                      } else if (field.options && Array.isArray(field.options)) {
+                          // Use static options from field definition
+                          field.options.forEach(option => {
+                              const optionValue = option.value ?? '';
+                              const optionLabel = option.label ?? optionValue;
+                              // مقایسه با مقدار اولیه برای انتخاب گزینه صحیح در حالت ویرایش
+                              const isSelected = (initialValue !== '' && optionValue == initialValue) ? 'selected' : '';
+                               inputHtml += `<option value="${htmlspecialchars(optionValue.toString(), 'ENT_QUOTES,ENT_HTML5')}" ${isSelected}>${htmlspecialchars(optionLabel, 'ENT_QUOTES,ENT_HTML5')}</option>`;
+                          });
+                      }
+                     inputHtml += `</select>`;
+                     break;
+                 case 'textarea':
+                     inputHtml = `<textarea ${commonAttrs} rows="3">${htmlspecialchars(initialValue.toString(), 'ENT_QUOTES,ENT_HTML5')}</textarea>`;
+                     break;
+                  case 'date':
+                       // Add jalali-datepicker class
+                       commonAttrs += ' jalali-datepicker';
+                       // Use text type for datepicker input
+                       inputHtml = `<input type="text" ${commonAttrs} value="${htmlspecialchars(initialValue.toString(), 'ENT_QUOTES,ENT_HTML5')}">`;
+                       break;
+                 case 'checkbox': // جدید: پشتیبانی از checkbox
+                     // Checkboxes need special handling for value and checked state
+                     // Value attribute is typically '1' or similar if checked
+                     // Name attribute might be different if unchecked value is needed
+                     // For simplicity, assume value is '1' if checked, and field is not present in POST if unchecked
+                     // Or use a hidden field approach if both 0 and 1 need to be sent for unchecked/checked
+                     // Let's use a simple checkbox for now. Value comes from itemData (should be 0 or 1)
+                     const isChecked = (initialValue == 1 || initialValue === true); // Check if initial value is 1 or true
+                      // Ensure the value sent when checked is '1'
+                      commonAttrs += ` value="1"`;
+                     if (isChecked) commonAttrs += ' checked';
+
+                     inputHtml = `<input type="checkbox" ${commonAttrs}>`;
+                     // For sending 0 when unchecked, a hidden field is often used right before the checkbox
+                      // Example: <input type="hidden" name="items[{index}][fieldName]" value="0">
+                     // We can add this here if needed by the backend
+                     const hiddenUncheckedInputName = `items[${index}][${fieldName}]_unchecked`; // Use a temporary name or handle in JS collectFormData
+                     // Simplest is to handle the '0' case in collectFormData or backend
+                     break;
+                 case 'number': // Although autonumeric handles numbers, keep as fallback for non-autonumeric numbers
+                 case 'text':
+                 default:
+                      // For readonly plaintext inputs, value is displayed as text, not in the value attribute
+                     if (isCalculated || isReadonly || isAutonumericReadonly) {
+                         inputHtml = `<input type="text" ${commonAttrs} value="">`; // Value set by JS for autonumeric-readonly or calculated
+                         // For non-numeric readonly calculated fields, just display the value
+                         if (!isNumeric || isReadonly) { // If non-numeric calculated/readonly or general readonly
+                              inputHtml = `<p class="form-control-plaintext" ${commonAttrs.replace('class="form-control', 'class="').replace('name="items[','data-name="items[').replace('id="','data-id="')}" >${htmlspecialchars(initialValue.toString(), 'ENT_QUOTES,ENT_HTML5')}</p>`;
+                             // Remove name and id to prevent submission and conflict
+                             // Use data attributes instead of name/id for reference if needed
+                         }
+
+                     } else {
+                          // Standard text or number input
+                          inputHtml = `<input type="${htmlspecialchars(fieldType, 'ENT_QUOTES,ENT_HTML5')}" ${commonAttrs} value="${htmlspecialchars(initialValue.toString(), 'ENT_QUOTES,ENT_HTML5')}">`;
+                     }
+                     break;
+             }
+
+             const fieldHtml = `
+                 <div class="${colClass}">
+                     <label for="${fieldId}" class="form-label">${htmlspecialchars(fieldLabel, 'ENT_QUOTES,ENT_HTML5')}${fieldRequired && !isCalculated && !isReadonly && !isAutonumericReadonly ? ' <span class="text-danger">*</span>' : ''}</label>
+                     ${inputHtml}
+                     <div class="invalid-feedback"></div> <!-- For Bootstrap validation feedback -->
+                 </div>
+             `;
+
+             $dynamicFieldsContainer.append(fieldHtml);
+
+              // --- Post-rendering initialization for specific field types ---
+
+              // Initialize AutoNumeric for the newly added field if applicable
+             if ((isNumeric && !isAutonumericReadonly) || isAutonumericReadonly) {
+                  const $numericInput = $dynamicFieldsContainer.find(`#${fieldId}`);
+                  if ($numericInput.length && typeof $.fn.autoNumeric !== 'undefined') {
+                       // Use options from data-autonumeric-options attribute set above
+                       const options = $numericInput.data('autonumeric-options') || {};
+                      try {
+                           $numericInput.autoNumeric('init', options);
+                            // Set initial value using autoNumeric('set') for numeric fields
+                           if (initialValue !== '') {
+                                $numericInput.autoNumeric('set', parseFloat(initialValue) || 0);
+                           } else if (isCalculated || isAutonumericReadonly) {
+                                // For calculated/readonly numeric fields, set to 0 initially if no value
+                                 $numericInput.autoNumeric('set', 0);
+                           }
+
+                       } catch (e) {
+                           console.error(`Error initializing AutoNumeric for field ${fieldName} (row ${index}):`, e);
+                       }
+                  } else if (isNumeric || isAutonumericReadonly) {
+                      console.warn(`AutoNumeric plugin not found or element not found for field ${fieldName} (row ${index}).`);
+                  }
+             }
+
+              // Initialize Select2 for the newly added field if applicable
+              if (fieldType === 'select' && typeof $.fn.select2 !== 'undefined') {
+                  const $selectElement = $dynamicFieldsContainer.find(`#${fieldId}`);
+                   if ($selectElement.length) {
+                        $selectElement.select2({
+                           theme: 'bootstrap-5',
+                           placeholder: $selectElement.find('option:first').text() || 'انتخاب کنید',
+                           allowClear: true,
+                           width: 'resolve'
+                        });
+                         // Set initial value for Select2
+                        if (initialValue !== '') {
+                             $selectElement.val(initialValue).trigger('change'); // Trigger change to update UI
+                        }
+                   }
+              }
+
+               // Initialize datepicker for the newly added field if applicable
+              if (fieldType === 'date') {
+                  const $dateInput = $dynamicFieldsContainer.find(`#${fieldId}`);
+                   this._initializeDatepickers($dateInput); // Initialize datepicker on the specific element
+              }
+         });
+
+         // After rendering and initializing dynamic fields, attach event listeners to them
+         // Event listeners are handled by delegation on _$itemsContainer
+         // this._attachDynamicFieldEventListeners($dynamicFieldsContainer, index);
+
+         console.log(`Rendered dynamic fields for group "${mainGroup}" in row ${index}.`);
+     }
+
+    // Initialize AutoNumeric for all elements in the form or a specific container
+     _initializeAllAutonumerics() {
+         if (typeof $.fn.autoNumeric === 'undefined') {
+             console.warn('AutoNumeric plugin not found.');
+             return;
+         }
+         console.log('Initializing AutoNumeric for all relevant fields...');
+         // Target elements with 'autonumeric' or 'autonumeric-readonly' class that are NOT within the template
+         // Also include input type="number" with is-numeric class if not already covered
+         this._$form.find('input.autonumeric:not(#templateItemRow input), input.autonumeric-readonly:not(#templateItemRow input)').each((_, element) => {
+             // اطمینان حاصل کنید که قبلا initialize نشده باشد
+             if (!$(element).data('autoNumeric')) {
+                 // console.log("Initializing autonumeric for element:", element);
+                 this._initializeAutonumeric(element);
+             }
+         });
+     }
+
+     // Initialize AutoNumeric for elements within a specific row
+     _initializeAutonumericsForRow(rowIndex) {
+         if (typeof $.fn.autoNumeric === 'undefined') {
+             console.warn('AutoNumeric plugin not found. Cannot initialize for row.');
+             return;
+         }
+          // Find the specific row by data-index and initialize autonumeric fields within it
+         this._$itemsContainer.find(`.transaction-item-row[data-index="${rowIndex}"] input.autonumeric, .transaction-item-row[data-index="${rowIndex}"] input.autonumeric-readonly`).each((_, element) => {
+             // اطمینان حاصل کنید که قبلا initialize نشده باشد
+             if (!$(element).data('autoNumeric')) {
+                 // console.log("Initializing autonumeric for new row element:", element);
+                 this._initializeAutonumeric(element);
+             }
+         });
+     }
+
+      // پیکربندی و initialize کردن Autonumeric برای یک المان خاص
+     _initializeAutonumeric(element) {
+         // شما باید تنظیمات Autonumeric را اینجا بر اساس نیاز تعریف کنید
+         // مثلاً جداکننده هزارگان، جداکننده اعشار، نماد واحد پول و ...
+         // این تنظیمات ممکن است از تنظیمات کلی برنامه (window.default_settings) خوانده شوند
+         const $element = $(element);
+          // اگر قبلا initialize شده، دوباره انجام نده
+         if ($element.data('autoNumeric')) {
+             //console.log("Autonumeric already initialized for element:", element);
+             return;
+         }
+
+         const fieldName = $element.data('field-name');
+          // تلاش برای خواندن تنظیمات از data attribute که در _renderDynamicFields تنظیم شده است
+          const options = $element.data('autonumeric-options'); // این آبجکت یا undefined خواهد بود
+
+         const defaultOptions = {
+             digitGroupSeparator: '٬', // جداکننده هزارگان فارسی
+             decimalCharacter: '.', // جداکننده اعشار (معمولا نقطه در پس‌زمینه)
+             decimalCharacterAlternative: ',', // جداکننده اعشار جایگزین برای ورودی (مثلا ویرگول)
+             //currencySymbol: ' ریال', // نماد واحد پول
+             //currencySymbolPlacement: AutoNumeric.options.eSymPlacement.suffix, // محل قرارگیری نماد واحد پول
+             minimumValue: '0', // حداقل مقدار پیش فرض
+             numberOfDecimals: 4, // تعداد ارقام اعشار پیش فرض
+             unStyleOnSubmit: true, // حذف استایل هنگام submit برای ارسال مقدار خام
+             // readOnly: false, // تعیین readOnly بر اساس کلاس یا فیلد config
+             // noEventListeners: false, // تعیین عدم اتصال event listener بر اساس کلاس یا فیلد config
+         };
+
+          // ادغام تنظیمات پیش‌فرض با تنظیمات خاص فیلد از data-autonumeric-options
+          const autoNumericOptions = $.extend({}, defaultOptions, options);
+
+
+          // تنظیم readOnly و noEventListeners بر اساس کلاس autonumeric-readonly
+         if ($element.hasClass('autonumeric-readonly')) {
+              autoNumericOptions.readOnly = true;
+               autoNumericOptions.noEventListeners = true;
+               // برای فیلدهای readonly معمولاً مقدار اولیه را مستقیماً در value قرار نمی‌دهیم
+               // بلکه با متد set از AutoNumeric مقداردهی می‌شوند
+         } else {
+             // اطمینان از اینکه این پراپرتی‌ها در حالت غیر readonly حذف یا false هستند
+             delete autoNumericOptions.readOnly;
+             delete autoNumericOptions.noEventListeners;
+         }
+
+
+         try {
+             new AutoNumeric(element, autoNumericOptions);
+             // console.log("Autonumeric initialized for:", fieldName || element.name);
+
+             // اگر در حالت ویرایش هستیم و مقدار اولیه وجود دارد، آن را با set() تنظیم کن
+             // این کار بعد از init انجام می‌شود تا AutoNumeric مقداردهی اولیه را فرمت کند
+              const initialValue = $element.val(); // مقداری که در value attribute هست
+              if (initialValue !== '') {
+                  // استفاده از set برای اطمینان از فرمت صحیح مقادیر اولیه
+                  $element.autoNumeric('set', parseFloat(initialValue) || 0);
+              } else if ($element.hasClass('autonumeric-readonly')) {
+                   // اگر فیلد readonly و بدون مقدار اولیه است، آن را 0 قرار بده
+                   $element.autoNumeric('set', 0);
+              }
+
+
+        } catch (e) {
+             console.error("Error initializing autonumeric for element:", element, "Error:", e);
+         }
+     }
+
+
+    // Initialize Select2 for all select elements in the form or a specific container
+     _initializeAllSelect2() {
+         if (typeof $.fn.select2 === 'undefined') {
+             console.warn('Select2 plugin not found.');
+             return;
+         }
+          console.log('Initializing Select2 for all relevant selects...');
+          // Target select elements with 'form-select' or 'product-select' class that are NOT within the template
+          // اطمینان از اینکه select2 قبلا initialize نشده باشد
+          this._$form.find('select.form-select:not(#templateItemRow select):not(.select2-hidden-accessible), select.product-select:not(#templateItemRow select):not(.select2-hidden-accessible)').each(function() {
+              const $this = $(this);
+               // Basic Select2 options
+              $this.select2({
+                  theme: 'bootstrap-5', // Assuming Bootstrap 5 theme is available
+                  placeholder: $(this).find('option:first').text() || 'انتخاب کنید',
+                   allowClear: true, // Optional: add a clear button
+                   width: 'resolve' // Automatically adjust width
+              });
+          });
+     }
+
+    // Initialize Select2 for select elements within a specific row
+    _initializeSelect2ForRow(rowIndex) {
+         if (typeof $.fn.select2 === 'undefined') {
+             console.warn('Select2 plugin not found. Cannot initialize for row.');
+             return;
+         }
+         // Find select elements within the specific row and initialize Select2
+          this._$itemsContainer.find(`.transaction-item-row[data-index="${rowIndex}"] select.form-select:not(.select2-hidden-accessible), .transaction-item-row[data-index="${rowIndex}"] select.product-select:not(.select2-hidden-accessible)`).each(function() {
+             const $this = $(this);
+              // Basic Select2 options
+              $this.select2({
+                  theme: 'bootstrap-5', // Assuming Bootstrap 5 theme is available
+                  placeholder: $(this).find('option:first').text() || 'انتخاب کنید',
+                   allowClear: true, // Optional: add a clear button
+                   width: 'resolve' // Automatically adjust width
+              });
+         });
+     }
+
+     // Initialize datepickers (assuming a library like Bootstrap Datepicker or similar)
+     _initializeDatepickers(container = this._$form) {
+         // Check if a datepicker plugin is available (e.g., assuming a class 'jalali-datepicker')
+         if (typeof $.fn.datepicker !== 'undefined' && typeof $.fn.datepicker.Constructor !== 'undefined') {
+             //console.log('Initializing datepickers...');
+              // Assuming jalali-datepicker class is used for date inputs
+              $(container).find('.jalali-datepicker').each(function() {
+                  const $this = $(this);
+                   // اطمینان حاصل کنید که قبلا initialize نشده باشد (چک کردن بر اساس data key یا کلاس)
+                   if (!$this.data('datepicker')) {
+                       // Initialize datepicker (adjust options based on your specific library)
+                       // Example options for a Bootstrap Datepicker compatible library (like bootstrap-datepicker or bootstrap-datepicker-jalali)
+                       $this.datepicker({
+                           format: 'yyyy/mm/dd', // Adjust format as needed
+                           autoclose: true,
+                           todayHighlight: true,
+                           rtl: true, // For RTL languages like Persian
+                           language: 'fa' // Assuming 'fa' locale is available for the datepicker
+                           // Add other options as required by your datepicker library
+                       }).on('changeDate', function() {
+                            // Trigger 'change' event on the input after date selection
+                            // This helps trigger form logic that listens for 'change'
+                            $(this).trigger('change');
+                        });
+                   }
+              });
+         } else {
+             // console.warn('Datepicker plugin not found. Date inputs will behave as standard text fields.');
+         }
+     }
+
+    // Attach global event listeners (add item button, form submit, etc.)
+    attachEventListeners() {
+        console.log('Attaching global event listeners.');
+        this._$addItemButton.on('click', () => this.addNewEmptyItemRow());
+        // Submit handled in $(document).ready
+
+         // Attach event listener for product select change (using delegation)
+         this._$itemsContainer.on('change', '.product-select', (event) => {
+             const $selectElement = $(event.target);
+             const $row = $selectElement.closest('.transaction-item-row');
+             const rowIndex = parseInt($row.attr('data-index'), 10);
+             const selectedProductId = $selectElement.val();
+
+             this._handleProductChange(rowIndex, selectedProductId);
+         });
+
+         // Attach event listener for changes in item fields (using delegation)
+         // Listen for input, change, and specifically for autonumeric's 'autoNumeric:formatted' event
+         // Use debounce to limit the frequency of recalculations
+         const debouncedRecalculateRow = debounce((rowIndex) => {
+             // پیدا کردن ردیف و محصول برای ارسال به calculateRow
+             const $row = this._$itemsContainer.find(`.transaction-item-row[data-index="${rowIndex}"]`);
+             const $productSelect = $row.find('.product-select');
+             const selectedProductId = $productSelect.val();
+             const selectedProduct = this._data.getProductById(selectedProductId);
+             const mainGroup = this._data.getCategoryGroup(selectedProduct);
+
+             this._formulaEngine.calculateRow($row.get(0), mainGroup, rowIndex, selectedProduct);
+             // Update summary fields after row recalculation
+             this.updateSummaryFields();
+         }, 250); // Wait 250ms after last change before recalculating
+
+         this._$itemsContainer.on('input change autoNumeric:formatted', '.item-field', function(event) {
+              const $fieldElement = $(this); // 'this' refers to the element that triggered the event
+              const $row = $fieldElement.closest('.transaction-item-row');
+              const rowIndex = parseInt($row.attr('data-index'), 10);
+
+             // Trigger the debounced recalculation for this row
+             debouncedRecalculateRow(rowIndex);
+         });
+
+
+         // Attach event listener for remove item button (using delegation)
+         this._$itemsContainer.on('click', '.remove-item-btn', (event) => {
+             const $button = $(event.target).closest('.remove-item-btn');
+             const $row = $button.closest('.transaction-item-row');
+              const rowIndex = parseInt($row.attr('data-index'), 10);
+             this._removeItemRow($row, rowIndex);
+         });
+
+        // Attach event listeners for global form fields (date, counterparty, etc.)
+         // Recalculate summary when relevant global fields change (e.g., transaction type, mazaneh_price)
+         this._$form.find('select#transaction_type').on('change', () => this.updateSummaryFields());
+          // Listen for input/change/autonumeric:formatted on mazaneh_price field
+         this._$form.find('#mazaneh_price').on('input change autoNumeric:formatted', debounce(() => {
+             // وقتی مزنه تغییر می‌کند، تمام ردیف‌ها و خلاصه باید دوباره محاسبه شوند
+              this.recalculateAllRows();
+              this.updateSummaryFields();
+         }, 250));
+
+
+    }
+
+    // Attach event listeners for elements within a newly added row (handled by delegation now)
+    _attachRowEventListeners($row, index) {
+        // Delegation handles this
+    }
+
+    // Handle change event on product select
+    _handleProductChange(rowIndex, selectedProductId) {
+        console.log(`Product changed in row ${rowIndex} to product ID: ${selectedProductId}`);
+        const $row = this._$itemsContainer.find(`.transaction-item-row[data-index="${rowIndex}"]`);
+        const $dynamicFieldsContainer = $row.find(`.dynamic-fields-row[id="dynamic-fields-${rowIndex}"]`);
+
+
+        if (!selectedProductId) {
+            // Product deselected - clear dynamic fields and show initial message
+            $dynamicFieldsContainer.html('<div class="col-12"><div class="alert alert-info">لطفاً محصول را انتخاب کنید تا فیلدهای مربوطه نمایش داده شوند.</div></div>');
+             // Clear any old validation messages
+            $row.find('.form-control').removeClass('is-valid is-invalid');
+             $row.find('.invalid-feedback').text('');
+             // Recalculate and update summary
+             // در این حالت، calculateRow با محصول null فراخوانی می‌شود و فیلدهای محاسبه شده را صفر می‌کند
+             this.recalculateItemRow(rowIndex);
+             this.updateSummaryFields();
+            return;
+        }
+
+        const selectedProduct = this._data.getProductById(selectedProductId);
+        if (selectedProduct) {
+            const mainGroup = this._data.getCategoryGroup(selectedProduct);
+            if (mainGroup) {
+                // Product selected and group determined - render dynamic fields
+                this._renderDynamicFields($row, rowIndex, mainGroup);
+                 // Re-initialize AutoNumeric, Select2 and datepickers for the newly rendered fields
+                 this._initializeAutonumericsForRow(rowIndex);
+                 this._initializeSelect2ForRow(rowIndex);
+                 this._initializeDatepickers($dynamicFieldsContainer);
+
+                 // Recalculate formulas for the row with new fields
+                 // استفاده از setTimeout کوتاه برای اطمینان از اینکه DOM به‌روز شده و AutoNumeric initialize شده است
+                 setTimeout(() => {
+                     this.recalculateItemRow(rowIndex);
+                     // Update summary after row recalculation
+                      this.updateSummaryFields();
+                 }, 50); // Short delay
+
+
+            } else {
+                console.warn(`Could not determine group for selected product ID ${selectedProductId} in row ${rowIndex}. Cannot render dynamic fields.`);
+                $dynamicFieldsContainer.html('<div class="col-12"><div class="alert alert-danger">گروه کالا مشخص نیست.</div></div>');
+                 // Clear any old validation messages
+                $row.find('.form-control').removeClass('is-valid is-invalid');
+                 $row.find('.invalid-feedback').text('');
+                // Recalculate and update summary (should result in 0s)
+                 this.recalculateItemRow(rowIndex);
+                 this.updateSummaryFields();
+            }
+        } else {
+            console.error(`Selected product ID ${selectedProductId} not found in product data.`);
+             $dynamicFieldsContainer.html('<div class="col-12"><div class="alert alert-danger">اطلاعات محصول یافت نشد.</div></div>');
+             // Clear any old validation messages
+            $row.find('.form-control').removeClass('is-valid is-invalid');
+             $row.find('.invalid-feedback').text('');
+             // Recalculate and update summary (should result in 0s)
+             this.recalculateItemRow(rowIndex);
+             this.updateSummaryFields();
+        }
+    }
+
+    // Remove an item row from the form
+    _removeItemRow($row, rowIndex) {
+        console.log('Removing item row with index:', rowIndex);
+         if (confirm(this._data.getMessage('confirm_delete_item'))) {
+            // Destroy any Select2 or AutoNumeric instances in this row before removing from DOM
+             $row.find('select').each(function() {
+                 const $select = $(this);
+                 if ($select.data('select2')) {
+                     $select.select2('destroy');
+                 }
+             });
+              $row.find('input.autonumeric, input.autonumeric-readonly').each(function() {
+                  const $input = $(this);
+                  if ($input.data('autoNumeric')) {
+                      $input.autoNumeric('destroy');
+                  }
+              });
+              // Destroy datepicker instances
+               $row.find('.jalali-datepicker').each(function() {
+                   const $input = $(this);
+                   if ($input.data('datepicker')) {
+                       $input.datepicker('destroy');
+                   }
+               });
+
+
+            $row.remove();
+             // Update summary after removing a row
+             this.updateSummaryFields();
+             // Optionally, re-index rows after removal if sparse indices are not desired for submission
+             // this._reindexRows();
+         }
+    }
+
+     // Recalculate formulas for a specific item row by its index
+     recalculateItemRow(rowIndex) {
+         // Find the row element
+         const $row = this._$itemsContainer.find(`.transaction-item-row[data-index="${rowIndex}"]`);
+         if ($row.length === 0) {
+             console.warn(`Row with index ${rowIndex} not found for recalculation.`);
+             return;
+         }
+
+          // Get the selected product and its group
+         const $productSelect = $row.find('.product-select');
+         const selectedProductId = $productSelect.val();
+         const selectedProduct = this._data.getProductById(selectedProductId);
+         const mainGroup = selectedProduct ? this._data.getCategoryGroup(selectedProduct) : null;
+
+         // Delegate calculation to FormulaEngine
+         this._formulaEngine.calculateRow($row.get(0), mainGroup, rowIndex, selectedProduct);
+
+         // After calculation, you might want to re-validate this row
+         // this._validateRow($row, rowIndex); // Optional: Implement row validation
+     }
+
+     // Recalculate formulas for all item rows
+     recalculateAllRows() {
+         console.log('Recalculating all rows...');
+         this._$itemsContainer.children('.transaction-item-row').each((index, rowElement) => {
+             const $row = $(rowElement);
+             const rowIndex = parseInt($row.attr('data-index'), 10);
+             this.recalculateItemRow(rowIndex);
+         });
+         console.log('Finished recalculating all rows.');
+     }
+
+
+     // Collect data from all item rows for summary calculation
+     _collectAllItemRowData() {
+         const allRowData = [];
+         this._$itemsContainer.children('.transaction-item-row').each((index, rowElement) => {
+             const $row = $(rowElement);
+             const rowIndex = parseInt($row.attr('data-index'), 10);
+             const selectedProductId = $row.find('.product-select').val();
+             const selectedProduct = this._data.getProductById(selectedProductId);
+
+              let rowData = {};
+              let mainGroup = null;
+
+             if (selectedProduct) {
+                 mainGroup = this._data.getCategoryGroup(selectedProduct);
+                 // Pass the actual group if known, otherwise indicate collecting all possible item fields
+                 rowData = this._formulaEngine._collectRowData($row.get(0), rowIndex, mainGroup || '__all_item_fields__');
+             } else {
+                 // If no product selected, collect data for all *possible* item fields (which will be defaults like 0 or "")
+                 console.warn(`No product selected in row ${rowIndex}. Collecting data for all possible item fields with default values.`);
+                  rowData = this._formulaEngine._collectRowData($row.get(0), rowIndex, '__all_item_fields__');
+             }
+
+             // Add product-specific data (like tax/vat flags/rates) to the rowData for summary formulas
+              if(selectedProduct) {
+                  rowData.tax_enabled = selectedProduct.tax_enabled ? 1 : 0;
+                  rowData.tax_rate = parseFloat(selectedProduct.tax_rate || '0') || 0;
+                  rowData.vat_enabled = selectedProduct.vat_enabled ? 1 : 0;
+                  rowData.vat_rate = parseFloat(selectedProduct.vat_rate || '0') || 0;
+                  // Add other product properties needed for summary formulas
+              } else {
+                   // If no product, add default tax/vat flags/rates as 0
+                   rowData.tax_enabled = 0;
+                   rowData.tax_rate = 0;
+                   rowData.vat_enabled = 0;
+                   rowData.vat_rate = 0;
+              }
+
+
+             // Add other useful info to rowData for summary context if needed by formulas
+             rowData._product = selectedProduct;
+             rowData._group = mainGroup;
+             rowData._index = rowIndex;
+
+             allRowData.push(rowData);
+         });
+         //console.log("Collected data for all item rows:", allRowData);
+         return allRowData;
+     }
+
+
+     // Update the summary fields at the bottom of the form
+     updateSummaryFields() {
+         console.log("Updating summary fields...");
+         const allRowData = this._collectAllItemRowData();
+         this._formulaEngine.calculateSummary(allRowData);
+         console.log("Summary fields updated.");
+     }
+
+     // نمایش پیام به کاربر در بالای فرم
+     showMessage(type, message) {
+         const alertClass = type === 'success' ? 'alert-success' : (type === 'error' ? 'alert-danger' : 'alert-info');
+         const alertHtml = `<div class="alert ${alertClass} alert-dismissible fade show" role="alert">
+                                 ${message}
+                                 <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                             </div>`;
+         this._$formMessagesContainer.html(alertHtml).show();
+          // Hide the message after a few seconds (optional)
+         // if (type !== 'error') { // Keep error messages visible until dismissed
+         //     setTimeout(() => this._$formMessagesContainer.fadeOut(), 5000); // Hide after 5 seconds
+         // }
+     }
+
+
+    // Handle form submission (can add validation here)
+    handleFormSubmit(event) {
+        event.preventDefault();
+        console.log('Form submit intercepted.');
+
+         // انجام ولیدیشن (می‌تواند پیچیده‌تر باشد و شامل چک کردن فیلدهای داینامیک و ...)
+         if (!this._validateForm()) {
+             console.warn('Form validation failed.');
+             // نمایش پیام خطا (اگر قبلا نمایش داده نشده)
+             this.showMessage('error', this._data.getMessage('validation_failed') || 'لطفاً تمام فیلدهای الزامی را پر کنید.');
+             return; // جلوگیری از ارسال فرم
+         }
+
+          // جمع آوری داده‌های فرم (شامل آیتم‌ها و فیلدهای محاسبه شده)
+         const formData = this.collectFormData();
+
+         // اضافه کردن توکن CSRF
+         const csrfToken = this._$form.find('input[name="csrf_token"]').val();
+         if (csrfToken) {
+             // formData.csrf_token = csrfToken; // اضافه کردن به آبجکت
+             // بهتر است توکن را مستقیما در HTTP Header یا پارامترهای URL ارسال کنید
+             // یا آن را در serializeArray لحاظ کنید اگر از serialize استفاده می‌کنید
+             // چون داریم به JSON تبدیل می‌کنیم، می‌توانیم اینجا اضافه کنیم:
+             formData.csrf_token = csrfToken;
+
+         } else {
+             console.error("CSRF token not found!");
+             this.showMessage('error', 'خطای امنیتی: توکن CSRF یافت نشد.');
+              // جلوگیری از ارسال فرم
+             return;
+         }
+
+
+         // ارسال داده‌ها با AJAX
+         const formAction = this._$form.attr('action');
+         console.log("Submitting form data to:", formAction, formData);
+
+         // نمایش پیام در حال ارسال
+         this.showMessage('info', this._data.getMessage('submitting') || 'در حال ثبت/ویرایش معامله...');
+         const $submitButton = this._$form.find('button[type="submit"]');
+         $submitButton.prop('disabled', true).text('در حال ارسال...'); // غیر فعال کردن دکمه ارسال و تغییر متن
+
+         $.ajax({
+            url: formAction,
+            method: 'POST',
+            contentType: 'application/json', // ارسال به صورت JSON
+             data: JSON.stringify(formData), // تبدیل آبجکت به رشته JSON
+            dataType: 'json', // انتظار پاسخ JSON
+            success: (response) => {
+                console.log("Form submission successful:", response);
+                 if (response.success) {
+                     this.showMessage('success', response.message || this._data.getMessage('submit_success') || 'عملیات با موفقیت انجام شد.');
+                     // انجام اقدامات پس از موفقیت (مثلاً ریدایرکت)
+                     if (response.redirect) {
+                         window.location.href = response.redirect;
+                     } else {
+                          // اگر ریدایرکت نشد، فعال کردن مجدد دکمه و نمایش پیام
+                           $submitButton.prop('disabled', false).text(this._data.getMessage('save_button') || '💾 ثبت معامله'); // بازیابی متن دکمه
+                          // در حالت ویرایش، شاید بخواهید فرم را با داده‌های جدید بارگیری کنید
+                            if (response.transactionId && formAction.includes(response.transactionId)) {
+                                // اگر در صفحه ویرایش هستیم و معامله با موفقیت ویرایش شده، کار خاصی لازم نیست
+                                 // Optional: Reload form data if server returned updated data
+                            } else {
+                                // اگر در صفحه افزودن هستیم و معامله جدید اضافه شده، شاید بخواهید فرم را ریست کنید
+                                // یا به صفحه لیست معاملات بروید
+                                 // window.location.href = this._data.getBaseUrl() + '/app/transactions';
+                                 // Or reset the form: this._$form.trigger('reset'); this._loadExistingItems();
+                            }
+                     }
+
+                 } else {
+                     console.error("Form submission failed with server errors:", response.errors);
+                     // نمایش پیام‌های خطای دریافت شده از سرور
+                     this.showMessage('error', response.errors || this._data.getMessage('submit_error') || 'خطا در ثبت/ویرایش معامله رخ داد.');
+                      $submitButton.prop('disabled', false).text(this._data.getMessage('save_button') || '💾 ثبت معامله'); // فعال کردن مجدد دکمه
+                 }
+            },
+            error: (xhr, status, error) => {
+                console.error("AJAX error during form submission:", status, error, xhr);
+                 try {
+                     const errorResponse = JSON.parse(xhr.responseText);
+                      if (errorResponse.errors) {
+                          this.showMessage('error', errorResponse.errors); // نمایش پیام‌های خطای دریافت شده از سرور
+    } else {
+                           this.showMessage('error', this._data.getMessage('ajax_error') || 'خطا در برقراری ارتباط با سرور.');
+                      }
+                 } catch (e) {
+                     console.error("Failed to parse error response:", e);
+                     this.showMessage('error', this._data.getMessage('ajax_error') || 'خطا در برقراری ارتباط با سرور.');
+                 }
+                 $submitButton.prop('disabled', false).text(this._data.getMessage('save_button') || '💾 ثبت معامله'); // فعال کردن مجدد دکمه
+            }
+         });
+
+     }
+
+     // انجام ولیدیشن فرم سمت کلاینت
+     _validateForm() {
+         let formIsValid = true;
+         // حذف کلاس‌های ولیدیشن قبلی
+         this._$form.find('.is-valid, .is-invalid').removeClass('is-valid is-invalid');
+         this._$form.find('.invalid-feedback').text('');
+
+
+         // 1. ولیدیشن فیلدهای اصلی فرم (غیر از آیتم‌ها)
+         this._$form.find(':input[required]').each((_, element) => {
+             const $field = $(element);
+             // چک کردن فیلدهایی که visibility: hidden ندارند (مثلا فیلدهای پنهان توسط Select2)
+             if ($field.is(':visible') || $field.attr('type') === 'hidden') {
+                  let fieldValue = $field.val();
+                  // برای Select2، نیاز به چک کردن مقدار واقعی داریم
+                  if ($field.hasClass('select2-hidden-accessible')) {
+                     fieldValue = $field.select2('val');
+                  }
+                  // برای AutoNumeric، نیاز به چک کردن مقدار خام داریم
+                 if ($field.hasClass('autonumeric') || $field.hasClass('autonumeric-readonly')) {
+                      fieldValue = $field.autoNumeric('get');
+                 }
+
+
+                 // چک کردن خالی بودن (با در نظر گرفتن 0 برای فیلدهای عددی)
+                 const fieldConfig = this._data.getFieldConfigByName($field.attr('name')); // ممکن است config برای فیلدهای اصلی نباشد
+                 const isNumeric = fieldConfig?.is_numeric || $field.hasClass('autonumeric') || $field.hasClass('autonumeric-readonly') || $field.attr('type') === 'number';
+
+
+                 let isEmpty = false;
+                 if (isNumeric) {
+                     // برای فیلدهای عددی، 0 معتبر نیست اگر required باشند (شاید نیاز به منطق دقیق‌تر باشد)
+                     isEmpty = !fieldValue || parseFloat(fieldValue) === 0;
+                 } else {
+                      isEmpty = !fieldValue || (typeof fieldValue === 'string' && fieldValue.trim() === '');
+                      // برای select2 که multiple نیست، value خالی هم invalid محسوب می‌شود
+                       if ($field.hasClass('select2-hidden-accessible') && !$field.prop('multiple') && (fieldValue === null || fieldValue === '')) {
+                           isEmpty = true;
+                       }
+                 }
+
+
+                 if (isEmpty) {
+                     formIsValid = false;
+                     $field.addClass('is-invalid');
+                      // پیدا کردن المنت نمایش Select2 برای افزودن کلاس invalid
+                      const $select2Container = $field.next('.select2-container');
+                      if($select2Container.length) $select2Container.find('.select2-selection').addClass('is-invalid');
+
+                      // نمایش پیام خطا
+                     const $feedbackDiv = $field.next('.invalid-feedback');
+                     const fieldLabel = $field.prev('label').text().replace(':', '').trim();
+                     $feedbackDiv.text(fieldLabel + ' الزامی است.');
+                 } else {
+                      $field.addClass('is-valid');
+                       const $select2Container = $field.next('.select2-container');
+                      if($select2Container.length) $select2Container.find('.select2-selection').addClass('is-valid');
+                 }
+             }
+         });
+
+         // 2. ولیدیشن ردیف‌های آیتم
+         const $itemRows = this._$itemsContainer.children('.transaction-item-row');
+          if ($itemRows.length === 0) {
+              // اگر هیچ ردیفی وجود ندارد و حداقل یک ردیف الزامی است
+              // مثلاً نمایش پیام خطا بالای کانتینر آیتم‌ها
+              console.warn('Form requires at least one item row.');
+              this.showMessage('error', this._data.getMessage('min_one_item_required') || 'حداقل یک قلم معامله باید وارد شود.');
+              formIsValid = false;
+          } else {
+              // اگر ردیف‌هایی وجود دارند، هر ردیف را ولیدیت کن
+              $itemRows.each((index, rowElement) => {
+                   const $row = $(rowElement);
+                   // ولیدیشن فیلد product_id (که همیشه required است)
+                   const $productSelect = $row.find('.product-select');
+                   const selectedProductId = $productSelect.val();
+
+                   if (!selectedProductId) {
+                       formIsValid = false;
+                       $productSelect.addClass('is-invalid');
+                        const $select2Container = $productSelect.next('.select2-container');
+                        if($select2Container.length) $select2Container.find('.select2-selection').addClass('is-invalid');
+                       const $feedbackDiv = $productSelect.next('.invalid-feedback');
+                       $feedbackDiv.text('انتخاب کالا الزامی است.');
+                   } else {
+                        $productSelect.addClass('is-valid');
+                       const $select2Container = $productSelect.next('.select2-container');
+                       if($select2Container.length) $select2Container.find('.select2-selection').addClass('is-valid');
+                       $productSelect.next('.invalid-feedback').text(''); // پاک کردن پیام خطا
+                   }
+
+                   // ولیدیشن سایر فیلدهای الزامی در این ردیف
+                   $row.find('.item-field[required]').each((_, fieldElement) => {
+                       const $field = $(fieldElement);
+                        // فیلدهای محاسبه شده نباید ولیدیت شوند که required هستند
+                        const fieldName = $field.data('field-name');
+                        const fieldConfig = this._data.getFieldConfigByName(fieldName);
+                        if(fieldConfig?.calculated || fieldConfig?.readonly || fieldConfig?.autonumeric_readonly) {
+                            // console.log(`Skipping validation for calculated/readonly field: ${fieldName}`);
+                            return; // Skip validation for calculated/readonly fields marked as required
+                        }
+
+                        let fieldValue = $field.val();
+                         // برای Select2 و AutoNumeric مقادیر واقعی را چک کن
+                       if ($field.hasClass('select2-hidden-accessible')) {
+                          fieldValue = $field.select2('val');
+                       }
+                        if ($field.hasClass('autonumeric') || $field.hasClass('autonumeric-readonly')) {
+                           fieldValue = $field.autoNumeric('get');
+                        }
+
+
+                       // چک کردن خالی بودن
+                       const isNumeric = fieldConfig?.is_numeric || $field.hasClass('autonumeric');
+                       let isEmpty = false;
+                       if (isNumeric) {
+                            isEmpty = !fieldValue || parseFloat(fieldValue) === 0;
+                       } else {
+                           isEmpty = !fieldValue || (typeof fieldValue === 'string' && fieldValue.trim() === '');
+                            if ($field.hasClass('select2-hidden-accessible') && !$field.prop('multiple') && (fieldValue === null || fieldValue === '')) {
+                               isEmpty = true;
+                           }
+                       }
+
+
+                       if (isEmpty) {
+                           formIsValid = false;
+                           $field.addClass('is-invalid');
+                            const $select2Container = $field.next('.select2-container');
+                            if($select2Container.length) $select2Container.find('.select2-selection').addClass('is-invalid');
+
+                           const $feedbackDiv = $field.next('.invalid-feedback');
+                           const fieldLabel = $field.prev('label').text().replace(':', '').trim();
+                           $feedbackDiv.text(fieldLabel + ' الزامی است.');
+                       } else {
+                           $field.addClass('is-valid');
+                            const $select2Container = $field.next('.select2-container');
+                            if($select2Container.length) $select2Container.find('.select2-selection').addClass('is-valid');
+                            $field.next('.invalid-feedback').text('');
+                       }
+                   });
+              });
+          }
+
+
+         // 3. ولیدیشن فیلدهای خلاصه (معمولا فقط خواندنی هستند و نیاز به ولیدیشن ندارند)
+         // 4. ولیدیشن فیلد یادداشت‌ها (اگر required است)
+          const $notesField = this._$form.find('textarea[name="notes"]');
+          if ($notesField.length && $notesField.prop('required')) {
+              if (!$notesField.val() || $notesField.val().trim() === '') {
+                   formIsValid = false;
+                   $notesField.addClass('is-invalid');
+                   const $feedbackDiv = $notesField.next('.invalid-feedback');
+                   const fieldLabel = $notesField.prev('label').text().replace(':', '').trim();
+                   $feedbackDiv.text(fieldLabel + ' الزامی است.');
+              } else {
+                  $notesField.addClass('is-valid');
+                  $notesField.next('.invalid-feedback').text('');
+              }
+          }
+
+
+         // اگر فرم معتبر نیست، به اولین فیلد نامعتبر scrollTo کنید
+         if (!formIsValid) {
+             const $firstInvalid = this._$form.find('.is-invalid').first();
+             if ($firstInvalid.length) {
+                 // برای Select2 یا AutoNumeric، به کانتینر آن‌ها اسکرول کنید
+                 const $scrollToElement = $firstInvalid.hasClass('select2-hidden-accessible') ? $firstInvalid.next('.select2-container') : ($firstInvalid.hasClass('autonumeric') || $firstInvalid.hasClass('autonumeric-readonly') ? $firstInvalid : $firstInvalid);
+
+                  // اسکرول نرم به المنت
+                 $('html, body').animate({
+                     scrollTop: $scrollToElement.offset().top - 100 // فاصله از بالا
+                 }, 500);
+
+                  // فوکوس کردن روی المنت نامعتبر (ممکن است برای همه انواع فیلد کار نکند)
+                 $firstInvalid.focus();
+             }
+         }
+
+         return formIsValid;
+     }
+
+
+     // Helper function for HTML entities encoding (basic)
+    htmlspecialchars(str, quote_style = 'ENT_QUOTES', charset = 'UTF-8') {
+        // This is a simplified version. Consider using a library or a more robust implementation.
+        if (typeof str !== 'string' && typeof str !== 'number') {
+            str = String(str);
+        }
+        let optTemp = 0,
+            i = 0,
+            noquotes = false;
+        if (typeof quote_style === 'undefined' || quote_style === null) {
+            quote_style = 2;
+        }
+        str = str.toString();
+         str = str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+         if (quote_style & 1) { // ENT_HTML_QUOTE_SINGLE
+             str = str.replace(/'/g, '&#039;');
+         }
+         if (! (quote_style & 2)) { // ENT_HTML_QUOTE_DOUBLE
+             noquotes = true;
+         }
+         if (noquotes !== true) { // ENT_QUOTES or ENT_COMPAT
+             str = str.replace(/"/g, '&quot;');
+         }
+
+        return str;
+    }
+
+
+    // بارگذاری لیست آزمایشگاه‌ها/ری‌گیری‌ها و پر کردن selectهای مربوطه
+    _loadAssayOffices() {
+        // فقط اگر selectی با data-source="assay_offices" وجود دارد، لیست را واکشی کن
+        if (this._$form.find('select[data-source="assay_offices"]').length === 0) {
+             //console.log("No assay office selects found. Skipping fetch.");
+             return;
+        }
+
+        const url = this._data.getBaseUrl() + '/app/assay-offices/list';
+        console.log("Fetching assay offices from:", url);
+        $.ajax({
+            url: url,
+            method: 'GET',
+            dataType: 'json',
+            success: (response) => {
+                //console.log("Assay offices fetched:", response);
+                if (response.success && Array.isArray(response.data)) {
+                    this._fillAssayOfficeSelects(response.data);
+        } else {
+                    console.error("Failed to fetch assay offices or invalid response format:", response);
+                    this.showMessage('error', this._data.getMessage('fetch_assay_offices_error') || 'خطا در بارگذاری لیست آزمایشگاه‌ها.');
+                }
+            },
+            error: (xhr, status, error) => {
+                console.error("AJAX error fetching assay offices:", status, error, xhr);
+                 let errorMessage = this._data.getMessage('ajax_error_assay_offices') || 'خطا در برقراری ارتباط برای بارگذاری لیست آزمایشگاه‌ها.';
+                 if (xhr.status === 404) errorMessage = this._data.getMessage('assay_offices_not_found') || 'آدرس سرویس آزمایشگاه‌ها یافت نشد.';
+                this.showMessage('error', errorMessage);
+            }
+        });
+    }
+
+     // پر کردن selectهای آزمایشگاه‌ها/ری‌گیری‌ها
+    _fillAssayOfficeSelects(offices) {
+         // پیدا کردن همه selectهایی که نیاز به لیست آزمایشگاه‌ها دارند و هنوز توسط Select2 initialize نشده‌اند
+        $('select[data-source="assay_offices"]:not(.select2-hidden-accessible)').each((_, selectElement) => {
+            const $select = $(selectElement);
+            const selectedValue = $select.val(); // ذخیره مقدار انتخاب شده فعلی
+            $select.empty().append('<option value="">انتخاب کنید</option>'); // اضافه کردن گزینه پیش‌فرض
+
+            offices.forEach(office => {
+                 // اطمینان از اینکه office.id و office.name وجود دارند
+                 if (office.id !== undefined && office.name !== undefined) {
+                      $select.append($('<option></option>').val(office.id).text(office.name));
+                 } else {
+                      console.warn("Invalid assay office data received:", office);
+                 }
+            });
+
+            // بازیابی مقدار انتخاب شده
+            if (selectedValue) {
+                 $select.val(selectedValue);
+            }
+
+             // initialize کردن Select2 پس از پر کردن گزینه‌ها
+            if (typeof $.fn.select2 !== 'undefined') {
+                  $select.select2({
+                       theme: 'bootstrap-5',
+                      placeholder: "جستجو و انتخاب آزمایشگاه/ری گیری",
+                       allowClear: true,
+                      width: 'resolve'
+                  });
+                  // بازیابی مقدار انتخاب شده برای Select2
+                   if (selectedValue) {
+                      $select.val(selectedValue).trigger('change'); // Trigger change to update Select2 UI
+                   }
+              } else {
+                   console.warn("Select2 plugin not found during _fillAssayOfficeSelects.");
+               }
+        });
+        //console.log("Assay office selects filled.");
+    }
+
+
+}
+
+// Debounce function to limit the rate of function calls
+function debounce(func, wait) {
+    let timeout;
+    return function(...args) {
+        const context = this;
+        clearTimeout(timeout);
+        timeout = setTimeout(() => func.apply(context, args), wait);
+    };
+}
+
+
+// 4. اپلیکیشن اصلی (Main Application) - ترکیب اجزا
+// این بلوک پس از بارگذاری کامل DOM اجرا می‌شود و اجزای اصلی را initialize می‌کند.
+$(document).ready(function() {
+    // بررسی وجود عناصر اصلی فرم قبل از شروع
+    if (!$('#transactionForm').length || !$('#transactionItemsContainer').length || !$('#addItemRowButton').length || !$('#templateItemRow').length || !$('#summaryFields').length) {
+        console.error("Transaction form elements not found. Initialization stopped.");
+        // نمایش یک پیام خطا به کاربر اگر فرم به درستی بارگذاری نشده است
+        $('#formMessages').html('<div class="alert alert-danger">خطا در بارگذاری ساختار فرم. لطفا صفحه را رفرش کنید.</div>').show();
+        return;
+    }
+
+     // اضافه کردن یک کانتینر برای پیام‌های فرم اگر وجود ندارد
+     if ($('#formMessages').length === 0) {
+         $('#transactionForm').before('<div id="formMessages" style="display: none;"></div>');
+     }
+
+
+    // بررسی وجود داده‌های اولیه در window
+     if (!window.allFieldsData || !window.allFormulasData || !window.productsData) {
+         console.error("Initial data (fields, formulas, products) not loaded in window. Initialization stopped.");
+          $('#formMessages').html('<div class="alert alert-danger">خطا در بارگذاری داده‌های اولیه فرم. لطفا صفحه را رفرش کنید.</div>').show();
+         return;
+     }
+
+
+    // ایجاد نمونه از کلاس‌ها
+    const transactionData = new TransactionData();
+    const formulaEngine = new FormulaEngine(transactionData);
+    const transactionUI = new TransactionUI(transactionData, formulaEngine);
+
+    // Initializing the form UI and logic
+    transactionUI.initializeForm();
+
+    // Bind form submission event
+    $('#transactionForm').on('submit', (event) => {
+        transactionUI.handleFormSubmit(event);
+    });
+
+     // Bind global event listeners (like add item button)
+     transactionUI.attachEventListeners();
+
+
+    console.log("DOM fully loaded. TransactionApp initialized.");
+
+     // Recalculate summary on window load to ensure correct initial state
+     // This is in addition to recalculation after initializeForm
+     // Added a setTimeout to ensure all elements and plugins are ready
+      $(window).on('load', function() {
+         console.log("Window load event fired. Re-calculating summary.");
+          setTimeout(() => {
+             transactionUI.updateSummaryFields();
+          }, 100); // Short delay
+     });
+
+});
+
+// Helper function for HTML entities encoding (basic) - Defined globally if needed elsewhere, otherwise keep within class
+// For this script's internal use in TransactionUI, we can define it there.
+// If needed globally, uncomment and keep here.
+/*
+function htmlspecialchars(str, quote_style = 'ENT_QUOTES', charset = 'UTF-8') {
+    // ... implementation ...
+}
+*/

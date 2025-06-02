@@ -1,0 +1,251 @@
+Folder PATH listing
+Volume serial number is 748D-1402
+D:.
+|   .env
+|   .htaccess
+|   .php-cs-fixer.cache
+|   client.sql
+|   client.txt
+|   composer.json
+|   composer.lock
+|   phinx.php
+|   products.sql
+|   product_categories.sql
+|   transaction.png
+|   transaction2.png
+|   transaction3.png
+|   version.txt
+|   
++---.idea
+|   |   .gitignore
+|   |   htdocs.iml
+|   |   modules.xml
+|   |   php-test-framework.xml
+|   |   php.xml
+|   |   phpspec.xml
+|   |   phpunit.xml
+|   |   workspace.xml
+|   |   
+|   \---inspectionProfiles
+|           Project_Default.xml
+|           
++---backups
+|       backup-20250503-155458.tar
+|       
++---config
+|       config.php
+|       database.php
+|       encryption.key
+|       fields.json
+|       formulas.json
+|       
++---logs
+|       application.log
+|       
++---public
+|   |   .htaccess
+|   |   favicon.ico
+|   |   index.php
+|   |   
+|   +---css
+|   |       all.min.css
+|   |       jalalidatepicker.css
+|   |       jalalidatepicker.min.css
+|   |       style.css
+|   |       
+|   +---images
+|   |       gold.jpg
+|   |       landing.jpg
+|   |       logo.png
+|   |       
+|   \---js
+|           autoNumeric.min.js
+|           bootstrap.bundle.min.js
+|           bootstrap.bundle.min.js.map
+|           jalalidatepicker.js
+|           jalalidatepicker.min.js
+|           messages.js
+|           transaction-form..js.txt
+|           transaction-form.js
+|           
++---sessions
+|       sess_0002acfjvo3phqdkfocoscor5g
+|       sess_000jtiicprkndbv5eh2m74t72p
+|       sess_00992qdsi4dap7b4b3dqlr4gjk
+|       sess_00fpus2458a1sv1e2jhco7kpbu
+|       sess_vvctgd3a5sgcurupvit0lgako3
+|       
++---src
+|   |   messages.php
+|   |   
+|   +---api
+|   |       api.php
+|   |       
+|   +---backups
+|   +---Controllers
+|   |       AbstractController.php
+|   |       ActivityLogsController.php
+|   |       AssayOfficeController.php
+|   |       AuthController.php
+|   |       BankAccountController.php
+|   |       CalculatorController.php
+|   |       CodeProtectionController.php
+|   |       ContactController.php
+|   |       DashboardController.php
+|   |       ErrorController.php
+|   |       HomeController.php
+|   |       InventoryController.php
+|   |       InventoryController.php.txt
+|   |       InvoiceController.php
+|   |       LicenseController.php
+|   |       PaymentController.php
+|   |       ProductCategoryController.php
+|   |       ProductController.php
+|   |       ProductController.php.txt
+|   |       SettingsController.php
+|   |       SystemController.php
+|   |       TransactionController.php
+|   |       TransactionController.php.txt
+|   |       UserController.php
+|   |       
+|   +---Core
+|   |       Database.php
+|   |       ErrorHandler.php
+|   |       ViewRenderer.php
+|   |       
+|   +---database
+|   +---Models
+|   |       InventoryLedger.php
+|   |       Product.php
+|   |       ProductCategory.php
+|   |       Transaction.php
+|   |       TransactionItem.php
+|   |       
+|   +---Repositories
+|   |       ActivityLogRepository.php
+|   |       AllQueriesRepository.php
+|   |       AssayOfficeRepository.php
+|   |       BankAccountRepository.php
+|   |       CoinInventoryRepository.php
+|   |       ContactRepository.php
+|   |       InventoryLedgerRepository.php
+|   |       InventoryRepository.php
+|   |       LicenseRepository.php
+|   |       PaymentRepository.php
+|   |       ProductCategoryRepository.php
+|   |       ProductRepository.php
+|   |       SettingsRepository.php
+|   |       TransactionItemRepository.php
+|   |       TransactionRepository.php
+|   |       UpdateHistoryRepository.php
+|   |       UserRepository.php
+|   |       
+|   +---Services
+|   |       ApiClient.php
+|   |       AuthService.php
+|   |       BackupService.php
+|   |       DatabaseService.php
+|   |       DeliveryService.php
+|   |       GoldPriceService.php
+|   |       LicenseService.php
+|   |       MonitoringService.php
+|   |       SecurityService.php
+|   |       UpdateService.php
+|   |       UserService.php
+|   |       
+|   +---Utils
+|   |       Encryption.php
+|   |       Helper.php
+|   |       jdf.php
+|   |       
+|   \---views
+|       +---activity_logs
+|       |       list.php
+|       |       
+|       +---assays
+|       |       form.php
+|       |       list.php
+|       |       
+|       +---auth
+|       |       activation_status.php
+|       |       login.php
+|       |       register.php
+|       |       
+|       +---bank_accounts
+|       |       form.php
+|       |       ledger.php
+|       |       list.php
+|       |       transactions.php
+|       |       
+|       +---calculator
+|       |       index.php
+|       |       
+|       +---contacts
+|       |       form.php
+|       |       ledger.php
+|       |       list.php
+|       |       
+|       +---dashboard
+|       |       index.php
+|       |       
+|       +---errors
+|       |       404.php
+|       |       405.php
+|       |       500.php
+|       |       
+|       +---home
+|       |       about.php
+|       |       landing.php
+|       |       
+|       +---inventory
+|       |       index.php
+|       |       
+|       +---invoices
+|       |       generator.php
+|       |       preview.php
+|       |       
+|       +---layouts
+|       |       footer.php
+|       |       footer.php.txt
+|       |       header.php
+|       |       header.php.txt
+|       |       
+|       +---license
+|       |       activate.php
+|       |       
+|       +---partials
+|       |       pagination.php
+|       |       
+|       +---payments
+|       |       form.php
+|       |       list.php
+|       |       
+|       +---products
+|       |       form.php
+|       |       list.php
+|       |       
+|       +---product_categories
+|       |       form.php
+|       |       list.php
+|       |       
+|       +---system
+|       |       backups.php
+|       |       code_protection.php
+|       |       index.php
+|       |       maintenance.php
+|       |       reset_confirm.php
+|       |       settings.php
+|       |       update.php
+|       |       update_report.php
+|       |       
+|       +---transactions
+|       |       form.php
+|       |       form.php.txt
+|       |       list.php
+|       |       
+|       \---users
+|               form.php
+|               list.php
+|               profile.php
+
+                    

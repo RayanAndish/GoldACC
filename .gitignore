@@ -1,0 +1,37 @@
+# IDE Files
+.idea/
+.vscode/
+
+# Composer
+/vendor/
+composer.phar
+
+# Environment & Configuration
+/config/encryption.key
+.env
+
+# Logs
+/logs/*
+*.log
+
+# Session Files
+/sessions/*
+
+# Backup Files
+/backups/*
+*.bak
+*.backup
+*.old
+
+# Database
+*.sqlite
+*.sqlite3
+
+# Cache
+*.cache
+
+# Temporary files
+*.tmp
+*.temp
+.DS_Store
+Thumbs.db

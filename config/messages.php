@@ -1,0 +1,142 @@
+<?php
+/**
+ * فایل پیام‌های سیستمی
+ * این فایل شامل پیام‌های سیستمی است که در سراسر برنامه استفاده می‌شوند.
+ */
+
+return [
+    // پیام‌های عمومی
+    'success' => 'عملیات با موفقیت انجام شد',
+    'error' => 'خطا در انجام عملیات',
+    'warning' => 'هشدار',
+    'info' => 'اطلاعات',
+    
+    // پیام‌های فرم
+    'required_field' => 'لطفا تمام فیلدهای الزامی را پر کنید',
+    'invalid_number' => 'عدد وارد شده نامعتبر است',
+    'invalid_carat' => 'عیار باید بین 700 تا 999.9 باشد',
+    'invalid_weight' => 'وزن باید عدد مثبت باشد',
+    'invalid_carat_weight' => 'وزن عیار باید عدد مثبت باشد',
+    
+    // پیام‌های تراکنش
+    'transaction_saved' => 'تراکنش با موفقیت ذخیره شد',
+    'transaction_update_success' => 'تراکنش با موفقیت به‌روزرسانی شد',
+    'transaction_create_success' => 'تراکنش جدید با موفقیت ثبت شد',
+    'transaction_delete_success' => 'تراکنش با موفقیت حذف شد',
+    'transaction_save_error' => 'خطا در ذخیره تراکنش',
+    'transaction_delete_error' => 'خطا در حذف تراکنش',
+    'transaction_not_found' => 'تراکنش مورد نظر یافت نشد',
+    'transaction_items_required' => 'حداقل یک ردیف کالا باید وارد شود',
+    
+    // پیام‌های اعتبارسنجی
+    'validation_errors' => 'لطفا خطاهای فرم را برطرف کنید',
+    'csrf_token_invalid' => 'توکن امنیتی نامعتبر است',
+    'csrf_token_missing' => 'توکن امنیتی یافت نشد',
+    
+    // پیام‌های تحویل
+    'delivery_completion_error' => 'خطا در تکمیل عملیات تحویل',
+    'delivery_receipt_completed' => 'دریافت با موفقیت تکمیل شد',
+    'delivery_send_completed' => 'تحویل با موفقیت تکمیل شد',
+    
+    // پیام‌های موجودی
+    'insufficient_quantity' => 'موجودی کافی نیست',
+    'insufficient_weight' => 'وزن موجودی کافی نیست',
+    'inventory_check_error' => 'خطا در بررسی موجودی',
+    
+    // پیام‌های خطای سرور
+    'server_error' => 'خطای سرور',
+    'server_error_details' => 'خطای داخلی سرور رخ داده است.',
+    'database_error' => 'خطای پایگاه داده',
+    'database_constraint_error' => 'خطای محدودیت پایگاه داده',
+    'invalid_request_method' => 'متد درخواست نامعتبر است',
+    'invalid_response_format' => 'فرمت پاسخ نامعتبر است',
+    'method_not_allowed' => 'متد غیرمجاز',
+    'method_not_allowed_details' => 'متد درخواست غیرمجاز است.',
+    'page_not_found' => 'صفحه مورد نظر یافت نشد.',
+    'dashboard' => 'داشبورد',
+    'login_page' => 'صفحه ورود',
+    
+    // پیام‌های فرم
+    'saving' => 'در حال ذخیره...',
+    'save' => 'ذخیره',
+    'cancel' => 'انصراف',
+    'delete' => 'حذف',
+    'edit' => 'ویرایش',
+    'add' => 'افزودن',
+    'search' => 'جستجو',
+    'filter' => 'فیلتر',
+    'clear' => 'پاک کردن',
+    'select' => 'انتخاب کنید...',
+
+    // پیام‌های سیستمی
+    'success_save' => 'اطلاعات با موفقیت ذخیره شد.',
+    'error_save' => 'خطا در ذخیره اطلاعات!',
+    'not_found' => 'موردی یافت نشد.',
+    'access_denied' => 'دسترسی غیرمجاز!',
+    'invalid_transaction_id' => 'شناسه معامله نامعتبر است.',
+    'inventory_update_success' => 'موجودی با موفقیت به‌روزرسانی شد',
+    'inventory_update_error' => 'خطا در به‌روزرسانی موجودی',
+    'delivery_receipt_completed' => 'دریافت با موفقیت تایید شد و موجودی به‌روز شد',
+    'delivery_send_completed' => 'تحویل با موفقیت تایید شد',
+    'delivery_completion_error' => 'خطا در تکمیل فرایند تحویل',
+    'delivery_completion_success' => 'عملیات تحویل با موفقیت انجام شد',
+    'delivery_completion_error_details' => 'خطا در تکمیل عملیات',
+    'capital_performance_shortage' => 'کمبود موجودی نسبت به هدف تعیین شده',
+    'capital_performance_excess' => 'موجودی بیش از هدف تعیین شده',
+    'delivery_receipt' => 'دریافت',
+    'delivery_send' => 'تحویل',
+    'invalid_assay_offices_data' => 'داده‌های مراکز ری‌گیری نامعتبر یا خالی است',
+    'assay_office_load_error' => 'خطا در بارگذاری مراکز ری‌گیری',
+    'assay_office_required' => 'انتخاب مرکز ری‌گیری برای طلای آبشده الزامی است',
+    'assay_office_not_found' => 'مرکز ری‌گیری انتخاب شده یافت نشد',
+    'assay_office_select_default' => 'انتخاب مرکز ری‌گیری...',
+    'foreign_key_constraint_error' => 'خطا در ذخیره‌سازی: محدودیت کلید خارجی رعایت نشده است',
+    'field_rendering_error' => 'خطا در نمایش فیلدها',
+    'database_constraint_error' => 'امکان انجام عملیات نیست: این رکورد به رکوردهای دیگر متصل است.',
+    'csrf_token_invalid' => 'توکن امنیتی نامعتبر است - لطفا صفحه را رفرش کنید.',
+    'csrf_token_missing' => 'توکن امنیتی موجود نیست - لطفا صفحه را رفرش کنید.',
+
+    // ترجمه نوع محصول
+    'product_types' => [
+        'melted' => 'آبشده',
+        'used_jewelry' => 'طلای دست دوم / متفرقه',
+        'new_jewelry' => 'طلای نو / ساخته شده',
+        'coin_bahar_azadi_new' => 'سکه بهار جدید',
+        'coin_bahar_azadi_old' => 'سکه بهار قدیم',
+        'coin_emami' => 'سکه امامی',
+        'coin_half' => 'نیم سکه',
+        'coin_quarter' => 'ربع سکه',
+        'coin_gerami' => 'سکه گرمی',
+        'other_coin' => 'سایر سکه ها',
+        'bullion' => 'شمش / طلای خام'
+    ],
+
+    // ترجمه نوع مخاطب
+    'contact_types' => [
+        'debtor' => 'مشتری',
+        'creditor_account' => 'تأمین کننده',
+        'counterparty' => 'همکار صنفی',
+        'mixed' => 'حساب واسط',
+    ],
+
+    // ترجمه وضعیت تحویل
+    'delivery_statuses' => [
+        'pending' => 'در انتظار',
+        'delivered' => 'تحویل شده',
+        'canceled' => 'لغو شده',
+    ],
+
+    // ترجمه وضعیت مجوز
+    'license_statuses' => [
+        'active' => 'فعال',
+        'expired' => 'منقضی',
+        'pending' => 'در انتظار',
+    ],
+    
+    // عناوین فیلدهای مراکز ری‌گیری
+    'assay_office_fields' => [
+        'name' => 'نام مرکز ری‌گیری',
+        'phone' => 'تلفن',
+        'address' => 'آدرس'
+    ]
+]; 

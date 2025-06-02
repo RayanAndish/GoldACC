@@ -1,0 +1,9 @@
+RewriteEngine On
+
+# Rewrite root requests to public folder
+RewriteRule ^$ public/ [L]
+
+# Rewrite other requests to public folder
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^(.*)$ public/$1 [L]

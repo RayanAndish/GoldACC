@@ -1,0 +1,8 @@
+{
+    "version": "1.04.250428.0",
+    "zip_url": "https://goldacc.ir/downloads/update-v1.04.250428.0.zip",
+    "checksum": "GENERATED_SHA256_CHECKSUM_FOR_THE_ZIP_FILE",
+    "release_date": "2025-04-28T10:00:00+03:30",
+    "changelog": "نسخه اولیه سامانه.\n- راه اندازی قابلیت های اصلی.\n- معرفی داشبورد کاربری.",
+    "min_php_version": "8.1"
+  }
