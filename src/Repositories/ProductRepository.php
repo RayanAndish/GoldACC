@@ -29,7 +29,7 @@ class ProductRepository {
     public function findById(int $id, bool $withCategory = false): ?Product {
         $sql = "SELECT p.*";
         if ($withCategory) {
-            $sql .= ", pc.name as category_name, pc.code as category_code, pc.base_category as category_base_category"; // Add other category fields as needed
+            $sql .= ", pc.name as category_name, pc.code as category_code, pc.base_category";
         }
         $sql .= " FROM products p";
         if ($withCategory) {
@@ -46,13 +46,12 @@ class ProductRepository {
             if ($data) {
                 $product = new Product($data);
                 if ($withCategory && $product->category_id !== null) {
-                    if (isset($data['category_name']) || isset($data['category_code']) || isset($data['category_base_category'])) {
+                    if (isset($data['category_name'])) {
                          $product->category = new ProductCategory([
                             'id' => $product->category_id,
-                            'name' => $data['category_name'] ?? null,
+                            'name' => $data['category_name'],
                             'code' => $data['category_code'] ?? null,
-                            'base_category' => $data['category_base_category'] ?? null,
-                            // Populate other category fields if fetched
+                            'base_category' => $data['base_category'] ?? null,
                         ]);
                     }
                 }
@@ -62,6 +61,57 @@ class ProductRepository {
         } catch (PDOException $e) {
             $this->logger->error("Error fetching product by ID: {$id}", ['exception' => $e->getMessage()]);
             return null;
+        }
+    }
+    
+    /**
+     * IMPROVEMENT: Finds multiple products by their IDs efficiently in a single query.
+     *
+     * @param array $ids Array of product IDs.
+     * @return Product[] An array of Product objects, indexed by their ID for fast lookup.
+     */
+    public function findByIds(array $ids): array
+    {
+        if (empty($ids)) {
+            return [];
+        }
+
+        // Create placeholders for the IN clause to prevent SQL injection
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        
+        $sql = "SELECT p.*, pc.name as category_name, pc.code as category_code, pc.base_category 
+                FROM products p
+                LEFT JOIN product_categories pc ON p.category_id = pc.id
+                WHERE p.id IN ({$placeholders})";
+
+        try {
+            $stmt = $this->db->prepare($sql);
+            // Bind each ID to its placeholder
+            foreach ($ids as $k => $id) {
+                $stmt->bindValue(($k + 1), $id, PDO::PARAM_INT);
+            }
+            $stmt->execute();
+            $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            
+            $products = [];
+            foreach ($results as $data) {
+                $product = new Product($data);
+                 if ($product->category_id && isset($data['category_name'])) {
+                    $product->category = new ProductCategory([
+                        'id' => $product->category_id,
+                        'name' => $data['category_name'],
+                        'code' => $data['category_code'] ?? null,
+                        'base_category' => $data['base_category'] ?? null
+                    ]);
+                }
+                // Index by ID for O(1) lookup in the controller
+                $products[$product->id] = $product;
+            }
+            return $products;
+
+        } catch (PDOException $e) {
+            $this->logger->error("Error fetching products by IDs.", ['ids' => $ids, 'exception' => $e->getMessage()]);
+            return [];
         }
     }
 

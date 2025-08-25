@@ -150,7 +150,9 @@ function getPageUrl($pageNumber, $baseUrl, $baseQueryParams) {
                                         <?= Helper::escapeHtml($tx['counterparty_name'] ?: '-') ?>
                                     <?php endif; ?>
                                 </td>
-                                <td class="text-center fw-bold number-fa"><?= Helper::escapeHtml($tx['total_value_rials_formatted'] ?? '?') ?></td>
+                                <td class="text-center fw-bold number-fa">
+                                    <?= Helper::formatRial($tx['total_value_rials'] ?? 0, false) ?>
+                                </td>
                                 <td class="text-center">
                                     <span class="badge <?= Helper::escapeHtml($tx['delivery_status_class'] ?? 'bg-secondary') ?>">
                                         <?= Helper::escapeHtml($tx['delivery_status_farsi'] ?? '?') ?>
@@ -158,12 +160,10 @@ function getPageUrl($pageNumber, $baseUrl, $baseQueryParams) {
                                 </td>
                                 <td class="text-center text-nowrap">
                                     <a href="<?= Helper::escapeHtml($baseUrl) ?>/app/transactions/edit/<?= (int)$tx['id'] ?>" class="btn btn-sm btn-outline-primary btn-action me-1 py-0 px-1" data-bs-toggle="tooltip" title="ویرایش"><i class="fas fa-edit fa-xs"></i></a>
-                                    
                                     <form action="<?= Helper::escapeHtml($baseUrl) ?>/app/transactions/delete/<?= (int)$tx['id'] ?>" method="POST" class="d-inline" onsubmit="return confirm('آیا از حذف معامله #<?= (int)$tx['id'] ?> مطمئن هستید؟');">
                                         <input type="hidden" name="csrf_token" value="<?= Helper::escapeHtml($csrfToken) ?>">
                                         <button type="submit" class="btn btn-sm btn-outline-danger btn-action me-1 py-0 px-1" data-bs-toggle="tooltip" title="حذف"><i class="fas fa-trash fa-xs"></i></button>
                                     </form>
-
                                     <?php if ($tx['can_complete_receipt'] ?? false): ?>
                                         <form action="<?= Helper::escapeHtml($baseUrl) ?>/app/transactions/complete-delivery/<?= (int)$tx['id'] ?>/receipt" method="POST" class="d-inline" onsubmit="return confirm('آیا دریافت کالای معامله #<?= (int)$tx['id'] ?> را تایید می‌کنید؟');">
                                             <input type="hidden" name="csrf_token" value="<?= Helper::escapeHtml($csrfToken) ?>">

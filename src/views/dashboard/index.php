@@ -205,7 +205,7 @@ $monthlyChartData = $dashboardData['monthly_chart_data'] ?? ($viewData['monthly_
                 <div class="row">
                     <?php // Pending Receipts ?>
                     <div class="col-md-6 border-end-md mb-3 mb-md-0 pe-md-3">
-                        <h6 class="small fw-bold mb-2"><i class="fas fa-arrow-down text-success me-1"></i>کالای دریافتنی <small>(از دیگران)</small></h6>
+                        <h6 class="small fw-bold mb-2"><i class="fas fa-arrow-down text-success me-1"></i>باید دریافت کنیم<small>(از دیگران)</small></h6>
                         <?php if (!empty($pendingReceiptSummary)): ?>
                             <ul class="list-unstyled small mb-0">
                                 <?php foreach ($pendingReceiptSummary as $item): ?>
@@ -221,7 +221,7 @@ $monthlyChartData = $dashboardData['monthly_chart_data'] ?? ($viewData['monthly_
                      </div>
                      <?php // Pending Deliveries ?>
                     <div class="col-md-6 ps-md-3">
-                        <h6 class="small fw-bold mb-2"><i class="fas fa-arrow-up text-warning me-1"></i>کالای تحویلی <small>(به دیگران)</small></h6>
+                        <h6 class="small fw-bold mb-2"><i class="fas fa-arrow-up text-warning me-1"></i>باید تحویل دهیم<small>(به دیگران)</small></h6>
                          <?php if (!empty($pendingDeliverySummary)): ?>
                             <ul class="list-unstyled small mb-0">
                                 <?php foreach ($pendingDeliverySummary as $item): ?>
