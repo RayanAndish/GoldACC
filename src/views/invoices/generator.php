@@ -6,7 +6,7 @@
  */
 
 use App\Utils\Helper; // Use the Helper class
-use App\core\CSRFProtector; // Use the CSRFProtector class
+use App\Core\CSRFProtector; // Use the CSRFProtector class
 
 // --- Extract data from $viewData ---
 $pageTitle = $viewData['page_title'] ?? 'صدور فاکتور معاملات';
@@ -101,12 +101,11 @@ $validTransactionTypes = $viewData['valid_transaction_types'] ?? ['buy', 'sell']
 <?php // --- Transaction Selection Table (Show only after successful POST filter) --- ?>
 <?php if ($formActionFilter == $_SERVER['REQUEST_URI'] && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'load_transactions' && empty($errorMessage) && !empty($transactions)): ?>
     <hr class="my-4">
-    <form id="invoice-items-form" method="post" action="<?php echo $form_action_preview; ?>" target="_blank" class="needs-validation" novalidate>
-        <input type="hidden" name="csrf_token" value="<?php echo CSRFProtector::generateToken(); ?>">
-        <input type="hidden" name="contact_id_for_invoice" value="<?php echo $selected_contact_id; ?>">
-        <input type="hidden" name="invoice_type" value="<?php echo $selected_transaction_type; ?>">
-         <?php // TODO: Add CSRF token ?>
-
+    <form id="invoice-items-form" method="post" action="<?php echo $baseUrl; ?>/app/invoice-preview" target="_blank">
+    <input type="hidden" name="csrf_token" value="<?php echo CSRFProtector::generateToken(); ?>">
+    <input type="hidden" name="contact_id_for_invoice" value="<?php echo (int)$selectedContactId; ?>">
+    <input type="hidden" name="invoice_type" value="<?php echo Helper::escapeHtml($selectedTransactionType); ?>">
+       <?php // TODO: Add CSRF token ?>
          <div class="card shadow-sm">
             <div class="card-header">
                 <h5 class="mb-0">۲. انتخاب ردیف‌های فاکتور <small class="text-muted">(نوع: <?php echo $selectedTransactionType == 'buy' ? 'خرید از طرف حساب' : 'فروش به طرف حساب'; ?>)</small></h5>
@@ -146,27 +145,15 @@ $validTransactionTypes = $viewData['valid_transaction_types'] ?? ['buy', 'sell']
             <div class="card-footer bg-light">
                 <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
                     <?php // Tax options ?>
-                    <div class="d-flex align-items-center gap-3 flex-wrap">
-                        <div class="form-check form-switch">
-                            <input class="form-check-input" type="checkbox" role="switch" id="apply_tax_checkbox" name="apply_tax" value="1" checked> <?php // Default checked? ?>
-                            <label class="form-check-label small" for="apply_tax_checkbox">محاسبه مالیات بر ارزش افزوده</label>
-                        </div>
-                        <div class="input-group input-group-sm" style="max-width: 150px;">
-                            <input type="text" class="form-control format-number-js" data-decimals="2"
-                                   id="tax_rate_percent_input" name="tax_rate_percent" value="9" <?php // Default tax rate? Make configurable ?>
-                                   inputmode="decimal" aria-label="درصد مالیات">
-                            <span class="input-group-text">%</span>
-                        </div>
-                    </div>
-                    <?php // Generate button ?>
-                    <div>
-                        <button type="submit" class="btn btn-success px-4" id="generate-invoice-btn" disabled>
-                            <i class="fas fa-file-invoice me-1"></i> مشاهده پیش‌نمایش فاکتور
-                        </button>
-                    </div>
+                    <div class="card-footer bg-light">
+                    <div class="d-flex justify-content-end align-items-center">
+                    <button type="submit" class="btn btn-success px-4" id="generate-invoice-btn" disabled>
+                        <i class="fas fa-file-invoice me-1"></i> مشاهده پیش‌نمایش فاکتور
+                    </button>
+                  </div>
                 </div>
             </div>
-        </div><?php // End card ?>
+        </div>
     </form>
 
     <?php // JS for checkbox interactions and tax field toggle ?>

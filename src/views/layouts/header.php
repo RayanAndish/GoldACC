@@ -45,65 +45,84 @@ if (!function_exists('isActive')) {
     <link rel="stylesheet" href="<?php echo $baseUrl; ?>/css/bootstrap.rtl.min.css">
     <link rel="stylesheet" href="<?php echo $baseUrl; ?>/css/all.min.css">
     <link rel="stylesheet" href="<?php echo $baseUrl; ?>/css/style.css">
-    <link rel="stylesheet" href="<?php echo $baseUrl; ?>/css/jalalidatepicker.min.css" />
-    <link rel="stylesheet" type="text/css" href="<?php echo $baseUrl; ?>/css/toastify.min.css">
+    <link rel="stylesheet" href="<?php echo $baseUrl; ?>/css/jalalidatepicker.min.css">
+    <link rel="stylesheet" href="<?php echo $baseUrl; ?>/css/toastify.min.css">
 
 </head>
 <body id="app-body">
 
 <?php if ($isLoggedIn): ?>
-    <nav class="navbar navbar-expand-lg navbar-dark fixed-top shadow-sm">
-        <div class="container">
-            <a class="navbar-brand" href="<?php echo Helper::escapeHtml($baseUrl); ?>/app/dashboard">
-                <i class="fas fa-gem me-2"></i> <?php echo Helper::escapeHtml($appName); ?>
-            </a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#mainNavbar" aria-controls="mainNavbar" aria-expanded="false" aria-label="Toggle navigation">
-                <span class="navbar-toggler-icon"></span>
-            </button>
-            <div class="collapse navbar-collapse" id="mainNavbar">
-                <ul class="navbar-nav me-auto mb-2 mb-lg-0">
-                    <li class="nav-item"><a class="nav-link <?php echo isActive($currentUri, [$baseUrl . '/app/dashboard', $baseUrl . '/']); ?>" href="<?php echo Helper::escapeHtml($baseUrl); ?>/app/dashboard">داشبورد</a></li>
-                    <li class="nav-item"><a class="nav-link <?php echo isActive($currentUri, $baseUrl . '/app/transactions'); ?>" href="<?php echo Helper::escapeHtml($baseUrl); ?>/app/transactions">معاملات</a></li>
-                    <li class="nav-item"><a class="nav-link <?php echo isActive($currentUri, $baseUrl . '/app/payments'); ?>" href="<?php echo Helper::escapeHtml($baseUrl); ?>/app/payments">پرداخت/دریافت</a></li>
-                    <li class="nav-item"><a class="nav-link <?php echo isActive($currentUri, $baseUrl . '/app/inventory'); ?>" href="<?php echo Helper::escapeHtml($baseUrl); ?>/app/inventory">موجودی انبار</a></li>
-                    <li class="nav-item dropdown">
-                        <a class="nav-link dropdown-toggle <?php echo isActive($currentUri, [$baseUrl . '/app/contacts', $baseUrl . '/app/products', $baseUrl . '/app/bank-accounts']); ?>" href="#" id="definitionsDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
-                            تعاریف
-                        </a>
-                        <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="definitionsDropdown">
-                            <li><a class="dropdown-item" href="<?php echo Helper::escapeHtml($baseUrl); ?>/app/contacts">مخاطبین</a></li>
-                            <li><a class="dropdown-item" href="<?php echo Helper::escapeHtml($baseUrl); ?>/app/products">کالاها و محصولات</a></li>
-                            <li><a class="dropdown-item" href="<?php echo Helper::escapeHtml($baseUrl); ?>/app/product-categories">دسته‌بندی کالاها</a></li>
-                            <li><a class="dropdown-item" href="<?php echo Helper::escapeHtml($baseUrl); ?>/app/bank-accounts">حساب‌های بانکی</a></li>
-                            <li><a class="dropdown-item" href="<?php echo Helper::escapeHtml($baseUrl); ?>/app/assay-offices">مراکز ری‌گیری</a></li>
-                        </ul>
-                    </li>
-                     <li class="nav-item"><a class="nav-link <?php echo isActive($currentUri, $baseUrl . '/app/invoice-generator'); ?>" href="<?php echo Helper::escapeHtml($baseUrl); ?>/app/invoice-generator">صدور فاکتور</a></li>
-                     <li class="nav-item"><a class="nav-link <?php echo isActive($currentUri, $baseUrl . '/app/calculator'); ?>" href="<?php echo Helper::escapeHtml($baseUrl); ?>/app/calculator">ماشین حساب</a></li>
-                </ul>
-                <ul class="navbar-nav ms-auto mb-2 mb-lg-0">
-                    <li class="nav-item dropdown">
-                       <a class="nav-link dropdown-toggle" href="#" id="userDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
-                           <i class="fas fa-user-circle me-1"></i> <?php echo Helper::escapeHtml($userDisplayName); ?>
-                       </a>
-                       <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userDropdown">
-                           <?php if ($loggedInUser && ($loggedInUser['role_id'] ?? 2) == 1): // Admin-only links ?>
-                               <li><a class="dropdown-item" href="<?php echo Helper::escapeHtml($baseUrl); ?>/app/users"><i class="fas fa-users-cog fa-fw me-2 text-muted"></i>مدیریت کاربران</a></li>
-                               <li><a class="dropdown-item" href="<?php echo Helper::escapeHtml($baseUrl); ?>/app/activity-logs"><i class="fas fa-history fa-fw me-2 text-muted"></i>گزارش فعالیت‌ها</a></li>
-                               <li><a class="dropdown-item" href="<?php echo Helper::escapeHtml($baseUrl); ?>/app/system/overview"><i class="fas fa-cogs fa-fw me-2 text-muted"></i>مدیریت سیستم</a></li>
-                               <li><a class="dropdown-item" href="<?php echo Helper::escapeHtml($baseUrl); ?>/app/settings"><i class="fas fa-sliders-h fa-fw me-2 text-muted"></i>تنظیمات</a></li>
-                               <li><hr class="dropdown-divider"></li>
-                           <?php endif; ?>
-                           <li><a class="dropdown-item" href="<?php echo Helper::escapeHtml($baseUrl); ?>/app/profile"><i class="fas fa-user-edit fa-fw me-2 text-muted"></i>پروفایل من</a></li>
-                           <li><a class="dropdown-item" href="<?php echo Helper::escapeHtml($baseUrl); ?>/about"><i class="fas fa-info-circle fa-fw me-2 text-muted"></i>درباره سامانه</a></li>
+    
+<nav class="navbar navbar-expand-lg navbar-dark fixed-top shadow-sm">
+    <div class="container">
+        <a class="navbar-brand" href="<?php echo Helper::escapeHtml($baseUrl); ?>/app/dashboard">
+            <i class="fas fa-gem me-2"></i> <?php echo Helper::escapeHtml($appName); ?>
+        </a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#mainNavbar" aria-controls="mainNavbar" aria-expanded="false" aria-label="Toggle navigation">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="mainNavbar">
+            <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+                <li class="nav-item"><a class="nav-link <?php echo isActive($currentUri, [$baseUrl . '/app/dashboard', $baseUrl . '/']); ?>" href="<?php echo Helper::escapeHtml($baseUrl); ?>/app/dashboard">داشبورد</a></li>
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle <?php echo isActive($currentUri, [$baseUrl . '/app/transactions', $baseUrl . '/app/settlements']); ?>" href="#" role="button" data-bs-toggle="dropdown">معاملات</a>
+                    <ul class="dropdown-menu">
+                        <li><a class="dropdown-item" href="<?php echo Helper::escapeHtml($baseUrl); ?>/app/transactions">لیست معاملات</a></li>
+                        <li><a class="dropdown-item" href="<?php echo Helper::escapeHtml($baseUrl); ?>/app/settlements/add">ثبت تسویه فیزیکی</a></li>
+                    </ul>
+                </li>
+                <li class="nav-item"><a class="nav-link <?php echo isActive($currentUri, $baseUrl . '/app/payments'); ?>" href="<?php echo Helper::escapeHtml($baseUrl); ?>/app/payments">پرداخت/دریافت</a></li>
+                <li class="nav-item"><a class="nav-link <?php echo isActive($currentUri, $baseUrl . '/app/inventory'); ?>" href="<?php echo Helper::escapeHtml($baseUrl); ?>/app/inventory">موجودی انبار</a></li>
+                
+                <!-- ====== منوی جدید گزارشات ====== -->
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle <?php echo isActive($currentUri, [$baseUrl . '/app/contacts', $baseUrl . '/app/invoice-generator']); ?>" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                        گزارشات
+                    </a>
+                    <ul class="dropdown-menu">
+                        <li><a class="dropdown-item" href="<?php echo Helper::escapeHtml($baseUrl); ?>/app/contacts">کارت حساب مشتریان</a></li>
+                        <li><a class="dropdown-item" href="<?php echo Helper::escapeHtml($baseUrl); ?>/app/invoice-generator">صدور فاکتور</a></li>
+                    </ul>
+                </li>
+                <!-- =============================== -->
+
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle <?php echo isActive($currentUri, [$baseUrl . '/app/products', $baseUrl . '/app/bank-accounts']); ?>" href="#" id="definitionsDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                        تعاریف
+                    </a>
+                    <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="definitionsDropdown">
+                        <li><a class="dropdown-item" href="<?php echo Helper::escapeHtml($baseUrl); ?>/app/contacts">مخاطبین</a></li>
+                        <li><a class="dropdown-item" href="<?php echo Helper::escapeHtml($baseUrl); ?>/app/products">کالاها و محصولات</a></li>
+                        <li><a class="dropdown-item" href="<?php echo Helper::escapeHtml($baseUrl); ?>/app/product-categories">دسته‌بندی کالاها</a></li>
+                        <li><a class="dropdown-item" href="<?php echo Helper::escapeHtml($baseUrl); ?>/app/bank-accounts">حساب‌های بانکی</a></li>
+                        <li><a class="dropdown-item" href="<?php echo Helper::escapeHtml($baseUrl); ?>/app/assay-offices">مراکز ری‌گیری</a></li>
+                    </ul>
+                </li>
+                 <li class="nav-item"><a class="nav-link <?php echo isActive($currentUri, $baseUrl . '/app/calculator'); ?>" href="<?php echo Helper::escapeHtml($baseUrl); ?>/app/calculator">ماشین حساب</a></li>
+            </ul>
+            <ul class="navbar-nav ms-auto mb-2 mb-lg-0">
+                <li class="nav-item dropdown">
+                   <a class="nav-link dropdown-toggle" href="#" id="userDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                       <i class="fas fa-user-circle me-1"></i> <?php echo Helper::escapeHtml($userDisplayName); ?>
+                   </a>
+                   <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userDropdown">
+                       <?php if ($loggedInUser && ($loggedInUser['role_id'] ?? 2) == 1): // Admin-only links ?>
+                           <li><a class="dropdown-item" href="<?php echo Helper::escapeHtml($baseUrl); ?>/app/users"><i class="fas fa-users-cog fa-fw me-2 text-muted"></i>مدیریت کاربران</a></li>
+                           <li><a class="dropdown-item" href="<?php echo Helper::escapeHtml($baseUrl); ?>/app/activity-logs"><i class="fas fa-history fa-fw me-2 text-muted"></i>گزارش فعالیت‌ها</a></li>
+                           <li><a class="dropdown-item" href="<?php echo Helper::escapeHtml($baseUrl); ?>/app/system/overview"><i class="fas fa-cogs fa-fw me-2 text-muted"></i>مدیریت سیستم</a></li>
+                           <li><a class="dropdown-item" href="<?php echo Helper::escapeHtml($baseUrl); ?>/app/settings"><i class="fas fa-sliders-h fa-fw me-2 text-muted"></i>تنظیمات</a></li>
                            <li><hr class="dropdown-divider"></li>
-                           <li><a class="dropdown-item" href="<?php echo Helper::escapeHtml($baseUrl); ?>/logout"><i class="fas fa-sign-out-alt fa-fw me-2 text-muted"></i>خروج از سیستم</a></li>
-                       </ul>
-                    </li>
-                </ul>
-            </div>
+                       <?php endif; ?>
+                       <li><a class="dropdown-item" href="<?php echo Helper::escapeHtml($baseUrl); ?>/app/profile"><i class="fas fa-user-edit fa-fw me-2 text-muted"></i>پروفایل من</a></li>
+                       <li><a class="dropdown-item" href="<?php echo Helper::escapeHtml($baseUrl); ?>/about"><i class="fas fa-info-circle fa-fw me-2 text-muted"></i>درباره سامانه</a></li>
+                       <li><hr class="dropdown-divider"></li>
+                       <li><a class="dropdown-item" href="<?php echo Helper::escapeHtml($baseUrl); ?>/logout"><i class="fas fa-sign-out-alt fa-fw me-2 text-muted"></i>خروج از سیستم</a></li>
+                   </ul>
+                </li>
+            </ul>
         </div>
-    </nav>
+    </div>
+</nav>
 <?php endif; ?>
 
 <main class="container flex-shrink-0 mb-4" style="padding-top: <?php echo $isLoggedIn ? '70px' : '20px'; ?> !important;">

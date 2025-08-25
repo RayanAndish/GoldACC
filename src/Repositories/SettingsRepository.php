@@ -62,25 +62,27 @@ class SettingsRepository {
      * @return array Associative array of all settings.
      */
     public function getAllSettingsAsAssoc(): array {
-         // If cache is already populated by multiple getSetting calls, use it?
-         // Or always fetch fresh? Let's fetch fresh for now to ensure consistency.
-         $this->settingsCache = []; // Clear cache before fetching all
+         $this->settingsCache = [];
          try {
             $sql = "SELECT `key`, `value` FROM settings";
             $stmt = $this->db->query($sql);
-            $results = $stmt->fetchAll(PDO::FETCH_KEY_PAIR); // Fetch as key => value
+            $results = $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
 
             if ($results) {
                  foreach ($results as $key => $value) {
-                     // Unserialize values
+                     // Unserialize values if they are serialized strings
                      $unserializedValue = @unserialize($value);
+                      
+                      // Check if unserialize was successful. If not, it's likely a simple string.
                       if ($unserializedValue === false && $value !== serialize(false)) {
-                          $this->settingsCache[$key] = $value; // Use raw if unserialize failed
+                          $this->settingsCache[$key] = $value; // Use raw string value
                       } else {
-                           $this->settingsCache[$key] = $unserializedValue;
+                           $this->settingsCache[$key] = $unserializedValue; // Use unserialized value
                       }
                  }
             }
+            // Log success with the count of actual settings found
+            $this->logger->debug("System settings fetched successfully.", ['count' => count($this->settingsCache)]);
             return $this->settingsCache;
 
          } catch (Throwable $e) {
@@ -88,7 +90,6 @@ class SettingsRepository {
              return []; // Return empty on error
          }
     }
-
     /**
      * Saves multiple settings at once.
      * Expects an associative array [key => value].
@@ -98,11 +99,11 @@ class SettingsRepository {
      * @return bool True on success, false on failure.
      * @throws \PDOException On database error during transaction.
      */
+    
     public function saveSettings(array $settings): bool {
         $this->logger->info("Attempting to save multiple settings.", ['keys' => array_keys($settings)]);
         $this->db->beginTransaction();
         try {
-            // Use INSERT ... ON DUPLICATE KEY UPDATE for efficiency
             $sql = "INSERT INTO settings (`key`, `value`, `updated_at`) VALUES (:key, :value, NOW())
                     ON DUPLICATE KEY UPDATE `value` = VALUES(`value`), `updated_at` = NOW()";
             $stmt = $this->db->prepare($sql);
@@ -112,14 +113,11 @@ class SettingsRepository {
                 $stmt->bindParam(':key', $key);
                 $stmt->bindParam(':value', $serializedValue);
                 if (!$stmt->execute()) {
-                     // If one fails, rollback immediately
                     $this->db->rollBack();
                     $this->logger->error("Failed to save setting.", ['key' => $key]);
-                     // Clear cache as state is inconsistent
                     $this->settingsCache = [];
                     return false;
                 }
-                // Update cache immediately on successful save
                 $this->settingsCache[$key] = $value;
             }
 
@@ -132,11 +130,11 @@ class SettingsRepository {
                 $this->db->rollBack();
             }
             $this->logger->error("Error saving settings.", ['exception' => $e]);
-             // Clear cache as state is inconsistent
             $this->settingsCache = [];
-            throw $e; // Rethrow the exception
+            throw $e;
         }
     }
+
 
     /**
      * خواندن مقدار یک کلید تنظیمات (ساده)

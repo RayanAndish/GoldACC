@@ -1,12 +1,11 @@
 <?php
-
+// src/Controllers/PaymentController.php
 namespace App\Controllers;
 
 use PDO;
 use Monolog\Logger;
 use Throwable;
 use Exception;
-use Morilog\Jalali\Jalalian;
 use App\Core\ViewRenderer;
 use App\Controllers\AbstractController;
 use App\Repositories\PaymentRepository;
@@ -14,6 +13,7 @@ use App\Repositories\ContactRepository;
 use App\Repositories\BankAccountRepository;
 use App\Repositories\TransactionRepository;
 use App\Utils\Helper;
+use App\Core\CSRFProtector;
 
 class PaymentController extends AbstractController {
 
@@ -34,60 +34,52 @@ class PaymentController extends AbstractController {
         $this->contactRepository = $services['contactRepository'];
         $this->bankAccountRepository = $services['bankAccountRepository'];
         $this->transactionRepository = $services['transactionRepository'] ?? null;
-        $this->logger->debug("PaymentController initialized.");
     }
 
     public function index(): void {
         $this->requireLogin();
         $pageTitle = "مدیریت پرداخت‌ها و دریافت‌ها";
-        $errorMessage = $this->getFlashMessage('payment_error');
-        $successMessage = $this->getFlashMessage('payment_success');
-
+        
         try {
             $itemsPerPage = (int)($this->config['app']['items_per_page'] ?? 15);
             $currentPage = filter_input(INPUT_GET, 'p', FILTER_VALIDATE_INT, ['options' => ['default' => 1, 'min_range' => 1]]);
             $searchTerm = trim(filter_input(INPUT_GET, 'search', FILTER_DEFAULT) ?? '');
             
             $totalRecords = $this->paymentRepository->countFiltered($searchTerm);
+            $paginationData = Helper::generatePaginationData($currentPage, $itemsPerPage, $totalRecords);
             
-            // FIX: Calculate offset directly in the controller before passing it.
-            $totalPages = ($totalRecords > 0) ? (int)ceil($totalRecords / $itemsPerPage) : 1;
-            $currentPage = max(1, min($currentPage, $totalPages)); // Ensure current page is valid
-            $offset = ($currentPage - 1) * $itemsPerPage;
-
-            $paginationData = Helper::generatePaginationData($currentPage, $totalPages, $totalRecords, $itemsPerPage);
-            
-            // Pass the calculated offset to the repository method.
-            $payments = $this->paymentRepository->getFilteredAndPaginated($searchTerm, $itemsPerPage, $offset);
+            $payments = $this->paymentRepository->getFilteredAndPaginated($searchTerm, $paginationData['itemsPerPage'], $paginationData['offset']);
 
             foreach ($payments as &$payment) {
-                 $payment['amount_rials_formatted'] = Helper::formatRial($payment['amount_rials'] ?? 0, false);
+                 $payment['amount_rials_formatted'] = Helper::formatRial($payment['amount_rials'] ?? 0);
                  $payment['direction_farsi'] = match($payment['direction'] ?? '') { 'inflow' => 'دریافت', 'outflow' => 'پرداخت', default => 'نامشخص' };
-                 $payment['payment_date_persian'] = !empty($payment['payment_date']) ? Jalalian::fromDateTime(new \DateTime($payment['payment_date']))->format('Y/m/d H:i') : '-';
+                 $payment['payment_date_persian'] = !empty($payment['payment_date']) ? Helper::formatPersianDateTime($payment['payment_date']) : '-';
+                 if (isset($payment['related_transaction_id']) && $payment['related_transaction_id'] > 0) {
+                     $txTypeFarsi = match($payment['related_transaction_type'] ?? '') { 'buy' => 'خرید', 'sell' => 'فروش', default => '؟' };
+                     $txContactName = Helper::escapeHtml($payment['related_transaction_contact_name'] ?? 'ناشناس');
+                     $payment['related_transaction_display'] = '#' . Helper::formatPersianNumber($payment['related_transaction_id']) . ': ' . $txTypeFarsi . ' از/به ' . $txContactName;
+                 }
             }
             unset($payment);
 
         } catch (Throwable $e) {
             $this->logger->error("Error fetching payments list.", ['exception' => $e]);
-            $errorMessage = $errorMessage ?: ['text' => "خطا در بارگذاری لیست."];
+            $this->setFlashMessage("خطا در بارگذاری لیست پرداخت‌ها.", 'danger');
             $payments = [];
-            $paginationData = Helper::generatePaginationData(1, 1, 0, 15);
+            $paginationData = Helper::generatePaginationData(1, $itemsPerPage, 0);
         }
 
         $this->render('payments/list', [
-            'page_title' => $pageTitle, 'payments' => $payments,
-            'error_msg' => $errorMessage['text'] ?? null, 'success_msg' => $successMessage['text'] ?? null,
-            'search_term' => Helper::escapeHtml($searchTerm), 'pagination' => $paginationData,
+            'page_title' => $pageTitle,
+            'payments' => $payments,
+            'search_term' => Helper::escapeHtml($searchTerm),
+            'pagination' => $paginationData,
+            'baseUrl' => $this->config['app']['base_url'],
         ]);
     }
 
-    public function showAddForm(): void {
-        $this->showForm(null);
-    }
-
-    public function showEditForm(int $paymentId): void {
-        $this->showForm($paymentId);
-    }
+    public function showAddForm(): void { $this->showForm(null); }
+    public function showEditForm(int $paymentId): void { $this->showForm($paymentId); }
 
     private function showForm(?int $paymentId = null): void {
         $this->requireLogin();
@@ -96,57 +88,67 @@ class PaymentController extends AbstractController {
         $paymentData = [];
         $loadingError = null;
 
-        $sessionKey = $isEditMode ? 'payment_edit_data_' . $paymentId : 'payment_add_data';
-        $flashFormData = $_SESSION[$sessionKey] ?? null;
-        if ($flashFormData) unset($_SESSION[$sessionKey]);
-
         try {
             if ($isEditMode) {
-                $paymentData = $this->paymentRepository->getById($paymentId);
+                $paymentData = $this->paymentRepository->getById($paymentId); 
                 if (!$paymentData) {
-                    $this->setSessionMessage('رکورد مورد نظر یافت نشد.', 'danger', 'payment_error');
+                    $this->setSessionMessage('رکورد مورد نظر یافت نشد.', 'danger');
                     $this->redirect('/app/payments');
                     return;
                 }
                 $relatedBankTx = $this->paymentRepository->findRelatedBankTransaction($paymentId);
                 if ($relatedBankTx) {
-                    if ((float)$relatedBankTx['amount'] < 0) $paymentData['source_bank_account_id'] = $relatedBankTx['bank_account_id'];
-                    else $paymentData['destination_bank_account_id'] = $relatedBankTx['bank_account_id'];
+                    if ((float)$relatedBankTx['amount'] < 0) { 
+                        $paymentData['source_bank_account_id'] = $relatedBankTx['bank_account_id'];
+                    } else { 
+                        $paymentData['destination_bank_account_id'] = $relatedBankTx['bank_account_id'];
+                    }
                 }
             }
 
-            if ($flashFormData) $paymentData = array_merge($paymentData, $flashFormData);
-
-            if (empty($paymentData['payment_date_persian'])) {
-                $paymentData['payment_date_persian'] = !empty($paymentData['payment_date'])
-                    ? Jalalian::fromDateTime(new \DateTime($paymentData['payment_date']))->format('Y/m/d H:i:s')
-                    : Jalalian::now()->format('Y/m/d H:i:s');
-            }
+            // آماده‌سازی تاریخ و مبلغ برای نمایش صحیح در فرم
+            $paymentData['payment_date_persian'] = !empty($paymentData['payment_date'])
+                ? Helper::formatPersianDateTime($paymentData['payment_date'], 'Y/m/d H:i')
+                : Helper::formatPersianDateTime('now', 'Y/m/d H:i');
+            
+            // **اصلاح کلیدی: مبلغ را به صورت عدد خام (بدون جداکننده) به فرم بفرست**
+            $paymentData['amount_rials_raw'] = $paymentData['amount_rials'] ?? '0';
 
             $contacts = $this->contactRepository->getAll();
             $bankAccounts = $this->bankAccountRepository->getAll();
-            $transactions = $this->transactionRepository ? $this->transactionRepository->getLatestTransactions(null, 20) : [];
-
+            $transactions = []; 
+            if ($this->transactionRepository) {
+                 $latestTransactions = $this->transactionRepository->getLatestTransactions(null, 50);
+                 foreach($latestTransactions as $tx) {
+                    $txFormatted = '#' . Helper::formatPersianNumber($tx['id']) . ': ';
+                    $txFormatted .= ($tx['transaction_type']=='buy'?'خرید':'فروش') . ' از/به ';
+                    $txFormatted .= Helper::escapeHtml($tx['counterparty_name'] ?? 'ناشناس');
+                    $transactions[] = ['id' => $tx['id'], 'display' => $txFormatted];
+                 }
+            }
+            
         } catch (Throwable $e) {
             $this->logger->error("Error loading payment form.", ['id' => $paymentId, 'exception' => $e]);
             $loadingError = "خطا در بارگذاری اطلاعات فرم.";
-            $paymentData = $flashFormData ?? [];
-            $contacts = []; $bankAccounts = []; $transactions = [];
+            $paymentData = []; $contacts = []; $bankAccounts = []; $transactions = [];
         }
 
-        $formError = $this->getFlashMessage('form_error');
-
         $this->render('payments/form', [
-            'page_title' => $pageTitle, 'is_edit_mode' => $isEditMode,
-            'form_action' => $this->config['app']['base_url'] . '/app/payments/save',
-            'payment' => $paymentData, 'contacts' => $contacts, 'bank_accounts' => $bankAccounts,
-            'transactions' => $transactions, 'payment_methods' => self::VALID_PAYMENT_METHODS,
-            'error_message' => $formError['text'] ?? null, 'loading_error' => $loadingError,
-            'submit_button_text' => $isEditMode ? 'به‌روزرسانی' : 'ثبت',
+            'page_title' => $pageTitle,
+            'is_edit_mode' => $isEditMode,
+            'form_action' => $this->config['app']['base_url'] . '/app/payments/save', // <-- این خط اضافه شود
+            'payment' => $paymentData,
+            'contacts' => $contacts,
+            'bank_accounts' => $bankAccounts,
+            'transactions' => $transactions,
+            'payment_methods' => self::VALID_PAYMENT_METHODS,
+            'loading_error' => $loadingError,
+            'baseUrl' => $this->config['app']['base_url'],
         ]);
     }
 
-    public function save(): void {
+
+   public function save(): void {
         $this->requireLogin();
         if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
             $this->redirect('/app/payments');

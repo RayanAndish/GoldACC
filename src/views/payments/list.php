@@ -1,11 +1,6 @@
 <?php
-/**
- * Template: src/views/payments/list.php
- * Displays the list of Payments/Receipts with search and pagination.
- * Receives data via $viewData array from PaymentController.
- */
-
-use App\Utils\Helper; // Use the Helper class
+use App\Utils\Helper;
+use App\Core\CSRFProtector;
 
 // --- Extract data from $viewData ---
 $pageTitle = $viewData['page_title'] ?? 'مدیریت پرداخت‌ها';
@@ -18,8 +13,13 @@ $baseUrl = $viewData['baseUrl'] ?? '';
 
 // Base URL for this page for search form and pagination links
 $pageBaseUrl = $baseUrl . '/app/payments';
-$queryString = !empty($searchTerm) ? '?search=' . urlencode($searchTerm) : '';
-// Add other filter parameters to queryString if implemented
+$queryStringParams = ['search' => $searchTerm]; // Only search for now
+// Helper to generate full query string URL
+function getPageUrl($pageNumber, $baseUrl, $queryParams) {
+    $params = $queryParams;
+    $params['p'] = $pageNumber;
+    return $baseUrl . '?' . http_build_query($params);
+}
 
 ?>
 
@@ -55,7 +55,6 @@ $queryString = !empty($searchTerm) ? '?search=' . urlencode($searchTerm) : '';
                 <a href="<?php echo $pageBaseUrl; ?>" class="btn btn-sm btn-outline-secondary" title="پاک کردن جستجو"><i class="fas fa-times"></i></a>
             </div>
             <?php endif; ?>
-            <?php // Add more filters here (Date range, Type, Contact etc.) ?>
          </form>
     </div>
 </div>
@@ -64,17 +63,15 @@ $queryString = !empty($searchTerm) ? '?search=' . urlencode($searchTerm) : '';
 <div class="card shadow-sm">
     <div class="card-header d-flex justify-content-between align-items-center">
         <h5 class="mb-0">لیست پرداخت‌ها و دریافت‌ها</h5>
-         <?php if ($pagination && isset($pagination['total_records']) && $pagination['total_records'] > 0): ?>
+         <?php if ($pagination && $pagination['totalRecords'] > 0): ?>
             <small class="text-muted">
-                نمایش <?php echo (($pagination['current_page']-1) * $pagination['items_per_page']) + 1; ?>
-                - <?php echo min($pagination['total_records'], $pagination['current_page'] * $pagination['items_per_page']); ?>
-                از <?php echo $pagination['total_records']; ?>
+                نمایش <?php echo Helper::formatPersianNumber($pagination['firstItem']); ?>
+                - <?php echo Helper::formatPersianNumber($pagination['lastItem']); ?>
+                از <?php echo Helper::formatPersianNumber($pagination['totalRecords']); ?>
             </small>
-        <?php else: ?>
-             <small class="text-muted">تعداد: <?php echo count($payments); ?></small> <?php // Fallback if pagination data is missing total_records ?>
         <?php endif; ?>
     </div>
-    <div class="card-body p-0 <?php echo empty($payments) ? 'p-md-4' : 'p-md-0'; ?>">
+    <div class="card-body p-0">
         <?php if (!empty($payments)): ?>
             <div class="table-responsive">
                 <table class="table table-striped table-hover table-sm align-middle mb-0">
@@ -94,18 +91,17 @@ $queryString = !empty($searchTerm) ? '?search=' . urlencode($searchTerm) : '';
                         <?php foreach ($payments as $p): ?>
                             <tr>
                                 <td class="small text-nowrap">
-                                    <?php echo $p['payment_date_persian'] ?? '-'; // Formatted in Controller ?>
+                                    <?php echo $p['payment_date_persian'] ?? '-'; ?>
                                 </td>
                                 <td class="small text-nowrap">
                                     <span class="badge bg-<?php echo ($p['direction'] === 'inflow') ? 'success' : 'danger'; ?>">
-                                        <?php echo $p['direction_farsi'] ?? '?'; // Processed in Controller ?>
+                                        <?php echo $p['direction_farsi'] ?? '?'; ?>
                                     </span>
                                 </td>
                                 <td class="text-center fw-bold number-fa">
-                                    <?php echo $p['amount_rials_formatted'] ?? '-'; // Processed in Controller ?>
+                                    <?php echo $p['amount_rials_formatted'] ?? '-'; ?>
                                 </td>
                                 <td class="small">
-                                    <?php // Display payer with link if contact_id exists ?>
                                     <?php if ($p['paying_contact_id']): ?>
                                         <a href="<?php echo $baseUrl; ?>/app/contacts/ledger/<?php echo (int)$p['paying_contact_id']; ?>" title="مشاهده کارت حساب">
                                             <?php echo Helper::escapeHtml($p['paying_contact_name'] ?: ($p['paying_details'] ?: '?')); ?> <i class="fas fa-external-link-alt fa-xs text-muted"></i>
@@ -115,7 +111,6 @@ $queryString = !empty($searchTerm) ? '?search=' . urlencode($searchTerm) : '';
                                     <?php endif; ?>
                                 </td>
                                 <td class="small">
-                                     <?php // Display receiver with link if contact_id exists ?>
                                      <?php if ($p['receiving_contact_id']): ?>
                                         <a href="<?php echo $baseUrl; ?>/app/contacts/ledger/<?php echo (int)$p['receiving_contact_id']; ?>" title="مشاهده کارت حساب">
                                             <?php echo Helper::escapeHtml($p['receiving_contact_name'] ?: ($p['receiving_details'] ?: '?')); ?> <i class="fas fa-external-link-alt fa-xs text-muted"></i>
@@ -125,19 +120,22 @@ $queryString = !empty($searchTerm) ? '?search=' . urlencode($searchTerm) : '';
                                     <?php endif; ?>
                                 </td>
                                 <td class="text-center small">
-                                    <?php if ($p['related_transaction_id']): ?>
-                                        <a href="<?php echo $baseUrl; ?>/app/transactions/edit/<?php echo (int)$p['related_transaction_id']; ?>" target="_blank" title="مشاهده معامله مرتبط">#<?php echo (int)$p['related_transaction_id']; ?></a>
+                                    <?php if (!empty($p['related_transaction_id']) && isset($p['related_transaction_display'])): ?>
+                                        <a href="<?php echo $baseUrl; ?>/app/transactions/edit/<?php echo (int)$p['related_transaction_id']; ?>" target="_blank" title="مشاهده معامله مرتبط">
+                                            <?php echo $p['related_transaction_display']; ?>
+                                        </a>
                                     <?php else: echo '-'; endif; ?>
                                 </td>
-                                <td class="small" title="<?php echo $p['notes']; // Escaped ?>">
-                                     <?php echo mb_substr($p['notes'] ?? '', 0, 40, 'UTF-8') . (mb_strlen($p['notes'] ?? '') > 40 ? '...' : ''); ?>
+                                <td class="small" title="<?php echo Helper::escapeHtml($p['notes'] ?? ''); ?>">
+                                     <?php echo Helper::escapeHtml(mb_substr($p['notes'] ?? '', 0, 40, 'UTF-8') . (mb_strlen($p['notes'] ?? '') > 40 ? '...' : '')); ?>
                                 </td>
                                 <td class="text-center text-nowrap">
                                      <?php // Edit Button ?>
                                     <a href="<?php echo $baseUrl; ?>/app/payments/edit/<?php echo (int)$p['id']; ?>" class="btn btn-sm btn-outline-primary btn-action me-1" data-bs-toggle="tooltip" title="ویرایش"><i class="fas fa-edit"></i></a>
                                      <?php // Delete Form (POST) ?>
                                     <form action="<?php echo $baseUrl; ?>/app/payments/delete/<?php echo (int)$p['id']; ?>" method="POST" class="d-inline" onsubmit="return confirm('آیا از حذف این رکورد مطمئن هستید؟ در صورت ارتباط با بانک، اثر آن نیز برمیگردد.');">
-                                        <?php // TODO: Add CSRF token ?>
+                                        <?php // Add CSRF token for safety. This comes from Controller: generateCsrfToken() ?>
+                                        <input type="hidden" name="csrf_token" value="<?php echo Helper::generateCsrfToken(); ?>"> 
                                         <button type="submit" class="btn btn-sm btn-outline-danger btn-action" data-bs-toggle="tooltip" title="حذف"><i class="fas fa-trash"></i></button>
                                     </form>
                                 </td>
@@ -149,10 +147,41 @@ $queryString = !empty($searchTerm) ? '?search=' . urlencode($searchTerm) : '';
 
              <?php // --- Pagination Links --- ?>
              <?php if ($pagination && isset($pagination['total_pages']) && $pagination['total_pages'] > 1): ?>
-                 <?php 
-                 $baseUrlForPagination = $pageBaseUrl . $queryString;
-                 include __DIR__ . '/../partials/pagination.php';
-                 ?>
+                 <nav class="d-flex justify-content-center my-3">
+                     <ul class="pagination pagination-sm mb-0">
+                         <li class="page-item <?php echo ($pagination['current_page'] <= 1) ? 'disabled' : ''; ?>">
+                             <a class="page-link" href="<?php echo getPageUrl(1, $pageBaseUrl, $queryStringParams); ?>" aria-label="First">
+                                 <span aria-hidden="true">««</span>
+                             </a>
+                         </li>
+                         <li class="page-item <?php echo ($pagination['current_page'] <= 1) ? 'disabled' : ''; ?>">
+                             <a class="page-link" href="<?php echo getPageUrl($pagination['current_page'] - 1, $pageBaseUrl, $queryStringParams); ?>" aria-label="Previous">
+                                 <span aria-hidden="true">«</span>
+                             </a>
+                         </li>
+                         <?php foreach ($pagination['pages'] as $page): ?>
+                             <?php if ($page['is_ellipsis']): ?>
+                                 <li class="page-item disabled"><span class="page-link">...</span></li>
+                             <?php else: ?>
+                                 <li class="page-item <?php echo $page['is_current'] ? 'active' : ''; ?>">
+                                     <a class="page-link" href="<?php echo getPageUrl($page['num'], $pageBaseUrl, $queryStringParams); ?>">
+                                         <?php echo Helper::formatPersianNumber($page['num']); ?>
+                                     </a>
+                                 </li>
+                             <?php endif; ?>
+                         <?php endforeach; ?>
+                         <li class="page-item <?php echo ($pagination['current_page'] >= $pagination['total_pages']) ? 'disabled' : ''; ?>">
+                             <a class="page-link" href="<?php echo getPageUrl($pagination['current_page'] + 1, $pageBaseUrl, $queryStringParams); ?>" aria-label="Next">
+                                 <span aria-hidden="true">»</span>
+                             </a>
+                         </li>
+                         <li class="page-item <?php echo ($pagination['current_page'] >= $pagination['total_pages']) ? 'disabled' : ''; ?>">
+                             <a class="page-link" href="<?php echo getPageUrl($pagination['total_pages'], $pageBaseUrl, $queryStringParams); ?>" aria-label="Last">
+                                 <span aria-hidden="true">»»</span>
+                             </a>
+                         </li>
+                     </ul>
+                 </nav>
              <?php endif; ?>
 
         <?php elseif (!$errorMessage): ?>
@@ -161,5 +190,31 @@ $queryString = !empty($searchTerm) ? '?search=' . urlencode($searchTerm) : '';
     </div>
 </div>
 
-<?php // Tooltip activation script ?>
-<script> /* Tooltip init code... */ </script>
+<?php // Tooltip activation script and Bootstrap's specific Tooltip JS initialization (should be in global JS or shared partial if common) ?>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+    var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+        return new bootstrap.Tooltip(tooltipTriggerEl);
+    });
+    
+    // Check and display flash messages based on URL params (similar to Transaction form if needed for lists)
+    // Assuming messages are setup in a global way if they appear here via this method.
+    // window.showMessage and window.Messages not provided for Payments, usually only in Transaction Module.
+    const urlParams = new URLSearchParams(window.location.search);
+    const message = urlParams.get('message');
+    const type = urlParams.get('type'); // Get 'success' or 'danger' type
+    if (message && type) {
+        const messageContainer = document.querySelector('#alert-container'); // Need a container to place it.
+        if (messageContainer) {
+            messageContainer.innerHTML = `<div class="alert alert-${type} alert-dismissible fade show">${message}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>`;
+            setTimeout(() => { // Auto-dismiss after 5 seconds
+                const alertEl = messageContainer.querySelector('.alert');
+                if (alertEl) {
+                    new bootstrap.Alert(alertEl).close();
+                }
+            }, 5000);
+        }
+    }
+});
+</script>

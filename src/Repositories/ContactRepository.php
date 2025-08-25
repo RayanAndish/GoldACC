@@ -6,6 +6,7 @@ use PDO;
 use PDOException;
 use Monolog\Logger;
 use Exception;
+use App\Utils\Helper;
 
 /**
  * کلاس ContactRepository برای تعامل با جدول پایگاه داده contacts.
@@ -212,105 +213,270 @@ class ContactRepository {
       * @return float مانده (مثبت:او بدهکار / منفی:او بستانکار - از دید ما).
       * @throws PDOException.
       */
-     public function calculateBalance(int $contactId): float {
-         $this->logger->debug("Calculating balance for contact ID: {$contactId}.");
-         $balance = 0.0;
-         try {
-             // منطق از calculate_contact_balance
-             // + Sales to contact (He owes us)
-             $sql_sell = "SELECT SUM(total_value_rials) FROM transactions WHERE counterparty_contact_id = :id AND transaction_type = 'sell'";
-             $stmt_sell = $this->db->prepare($sql_sell); $stmt_sell->bindValue(':id', $contactId, PDO::PARAM_INT); $stmt_sell->execute();
-             $balance += (float)($stmt_sell->fetchColumn() ?: 0.0);
+    public function calculateBalance(int $contactId): float
+    {
+        $this->logger->debug("Calculating final RIAl balance for contact ID: {$contactId}.");
+        $balance = 0.0;
+        try {
+            $params = [':id' => $contactId];
 
-             // - Buys from contact (We owe him)
-             $sql_buy = "SELECT SUM(total_value_rials) FROM transactions WHERE counterparty_contact_id = :id AND transaction_type = 'buy'";
-             $stmt_buy = $this->db->prepare($sql_buy); $stmt_buy->bindValue(':id', $contactId, PDO::PARAM_INT); $stmt_buy->execute();
-             $balance -= (float)($stmt_buy->fetchColumn() ?: 0.0);
+            // فروش‌های تکمیل شده (او به ما بدهکار می‌شود -> مثبت)
+            $stmt_sell = $this->db->prepare("SELECT SUM(final_payable_amount_rials) FROM transactions WHERE counterparty_contact_id = :id AND transaction_type = 'sell' AND delivery_status = 'completed'");
+            $stmt_sell->execute($params);
+            $balance += (float)$stmt_sell->fetchColumn();
 
-             // + Payments We made to contact (He owes less or becomes our debtor)
-             $sql_paid_to = "SELECT SUM(amount_rials) FROM payments WHERE receiving_contact_id = :id";
-             $stmt_paid_to = $this->db->prepare($sql_paid_to); $stmt_paid_to->bindValue(':id', $contactId, PDO::PARAM_INT); $stmt_paid_to->execute();
-             $balance += (float)($stmt_paid_to->fetchColumn() ?: 0.0);
+            // خریدهای تکمیل شده (ما به او بدهکار می‌شویم -> منفی)
+            $stmt_buy = $this->db->prepare("SELECT SUM(final_payable_amount_rials) FROM transactions WHERE counterparty_contact_id = :id AND transaction_type = 'buy' AND delivery_status = 'completed'");
+            $stmt_buy->execute($params);
+            $balance -= (float)$stmt_buy->fetchColumn();
 
-             // - Payments He made to us (We owe less or he becomes our creditor)
-             $sql_paid_by = "SELECT SUM(amount_rials) FROM payments WHERE paying_contact_id = :id";
-             $stmt_paid_by = $this->db->prepare($sql_paid_by); $stmt_paid_by->bindValue(':id', $contactId, PDO::PARAM_INT); $stmt_paid_by->execute();
-             $balance -= (float)($stmt_paid_by->fetchColumn() ?: 0.0);
+            // پرداخت‌های او به ما (بدهی او کم می‌شود -> منفی)
+            $stmt_paid_by = $this->db->prepare("SELECT SUM(amount_rials) FROM payments WHERE paying_contact_id = :id");
+            $stmt_paid_by->execute($params);
+            $balance -= (float)$stmt_paid_by->fetchColumn();
 
-         } catch (PDOException $e) {
-              $this->logger->error("Database error calculating balance for contact ID {$contactId}: " . $e->getMessage(), ['exception' => $e]);
-              throw $e; // Throw exception on DB error
-         } catch (Throwable $e) {
-              $this->logger->error("Error calculating balance for contact ID {$contactId}: " . $e->getMessage(), ['exception' => $e]);
+            // پرداخت‌های ما به او (بدهی ما کم می‌شود -> مثبت)
+            $stmt_paid_to = $this->db->prepare("SELECT SUM(amount_rials) FROM payments WHERE receiving_contact_id = :id");
+            $stmt_paid_to->execute($params);
+            $balance += (float)$stmt_paid_to->fetchColumn();
+
+        } catch (Throwable $e) {
+              $this->logger->error("Error calculating balance for contact ID {$contactId}", ['exception' => $e]);
               throw $e;
-         }
-         return round($balance, 2);
-     }
+        }
+        return round($balance, 2);
+    }
+
+
+ /**
+     * (نسخه نهایی با رفع خطای Undefined variable $params_pays و منطق کامل)
+     */
+    public function getUnifiedLedgerEntries(int $contactId, ?string $startDate, ?string $endDate): array
+    {
+        $this->logger->debug("Fetching unified ledger entries with FINAL logic.", [
+            'contact_id' => $contactId, 'start_date' => $startDate, 'end_date' => $endDate
+        ]);
+        $allEntries = [];
+        
+        // تعریف متغیرهای فیلتر تاریخ
+        $dateFilterTrans = '';
+        $dateFilterPays = '';
+        $dateFilterSettle = '';
+        
+        // تعریف پارامترهای نام‌گذاری شده برای کوئری‌هایی که از آن استفاده می‌کنند
+        $baseParams = [':contact_id' => $contactId];
+        if ($startDate) {
+            $dateFilterTrans = " AND t.transaction_date >= :start_date";
+            $dateFilterSettle = " AND ps.settlement_date >= :start_date";
+            $dateFilterPays = " AND p.payment_date >= ?"; // استفاده از placeholder موقعیتی
+            $baseParams[':start_date'] = $startDate;
+        }
+        if ($endDate) {
+            $dateFilterTrans .= " AND t.transaction_date <= :end_date";
+            $dateFilterSettle .= " AND ps.settlement_date <= :end_date";
+            $dateFilterPays .= " AND p.payment_date <= ?"; // استفاده از placeholder موقعیتی
+            $baseParams[':end_date'] = $endDate;
+        }
+
+        
+          try {
+            // **اصلاح نهایی: تکمیل سینتکس ناقص SQL**
+            $sql_trans_items = "
+                SELECT 
+                    ti.id AS entry_id, 'transaction_item' AS entry_type, t.transaction_date AS entry_date,
+                    t.transaction_type, p.name AS product_name, t.id AS transaction_id,
+                    ti.weight_grams, ti.carat, ti.quantity, ti.coin_year, ti.tag_number,
+                    pc.base_category,
+
+                    (CASE 
+                        WHEN t.transaction_type = 'sell' THEN 
+                            (IFNULL(ti.total_value_rials, 0) + IFNULL(ti.ajrat_rials, 0) + IFNULL(ti.profit_amount_rials, 0) + IFNULL(ti.fee_amount_rials, 0) + IFNULL(ti.general_tax_rials, 0) + IFNULL(ti.vat_rials, 0))
+                        ELSE 0 
+                    END) as debit_rial,
+                    (CASE 
+                        WHEN t.transaction_type = 'buy' THEN 
+                            (IFNULL(ti.total_value_rials, 0) + IFNULL(ti.ajrat_rials, 0) + IFNULL(ti.profit_amount_rials, 0) + IFNULL(ti.fee_amount_rials, 0) + IFNULL(ti.general_tax_rials, 0) + IFNULL(ti.vat_rials, 0))
+                        ELSE 0 
+                    END) as credit_rial
+                FROM transaction_items ti
+                JOIN transactions t ON ti.transaction_id = t.id
+                JOIN products p ON ti.product_id = p.id
+                JOIN product_categories pc ON p.category_id = pc.id
+                WHERE t.counterparty_contact_id = :contact_id 
+                  AND t.delivery_status = 'completed'
+                  {$dateFilterTrans}
+                ";
+            $stmt_trans = $this->db->prepare($sql_trans_items);
+            $stmt_trans->execute($baseParams);
+            $trans_items = $stmt_trans->fetchAll(PDO::FETCH_ASSOC);
+
+            // منطق PHP برای پردازش نتایج (این بخش کاملا صحیح است و بدون تغییر باقی می‌ماند)
+            foreach($trans_items as $item){
+                 // ... (منطق switch بر اساس base_category) ...
+                 switch ($item['base_category']) {
+                    case 'COIN':
+                         $item['is_countable_display'] = true;
+                         $value = (float)($item['quantity'] ?? 0);
+                         if ($item['transaction_type'] == 'buy') $item['display_debit'] = $value;
+                         else $item['display_credit'] = $value;
+                         break;
+                    case 'JEWELRY': // جواهر نیز اکنون به عنوان تعدادی در نظر گرفته می‌شود
+                         $item['is_countable_display'] = true;
+                         $value = (float)($item['quantity'] ?? 0);
+                         if ($item['transaction_type'] == 'buy') {
+                            $item['display_debit'] = $value;
+                            $item['debit_count_for_balance'] = $value;
+                         } else {
+                            $item['display_credit'] = $value;
+                            $item['credit_count_for_balance'] = $value;
+                         }
+                         break;
+                     
+                     default: // برای هر کالای وزنی دیگر
+                         $item['is_countable_display'] = false;
+                         $weight750 = Helper::convertGoldToCarat((float)($item['weight_grams'] ?? 0), (int)($item['carat'] ?? 0));
+                         
+                         if ($item['transaction_type'] == 'buy') {
+                             $item['display_debit'] = $weight750;
+                             $item['debit_weight_for_balance'] = $weight750;
+                         } else { // sell
+                             $item['display_credit'] = $weight750;
+                             $item['credit_weight_for_balance'] = $weight750;
+                         }
+                         break;
+                 }
+                 $allEntries[] = $item;
+            }
+
+            // 2. واکشی تمام پرداخت‌ها (با تعریف صحیح پارامترها)
+            $sql_pays = "
+                SELECT 
+                    p.id AS entry_id, 'payment' AS entry_type, p.payment_date AS entry_date, 
+                    p.notes, p.payment_method,
+                    (CASE WHEN p.receiving_contact_id = ? THEN p.amount_rials ELSE 0 END) as debit_rial,
+                    (CASE WHEN p.paying_contact_id = ? THEN p.amount_rials ELSE 0 END) as credit_rial,
+                    0 as debit_weight_750, 0 as credit_weight_750,
+                    p.related_transaction_id
+                FROM payments p
+                WHERE (p.paying_contact_id = ? OR p.receiving_contact_id = ?)
+                {$dateFilterPays}
+            ";
+            
+            $params_pays = [$contactId, $contactId, $contactId, $contactId];
+            if ($startDate) {
+                $params_pays[] = $startDate;
+            }
+            if ($endDate) {
+                $params_pays[] = $endDate;
+            }
+            $stmt_pays = $this->db->prepare($sql_pays);
+            $stmt_pays->execute($params_pays);
+            $payment_items = $stmt_pays->fetchAll(PDO::FETCH_ASSOC);
+            foreach($payment_items as $item) {
+                $item['is_countable_display'] = false;
+                $item['display_debit'] = 0; $item['display_credit'] = 0;
+                $item['debit_weight_for_balance'] = 0; $item['credit_weight_for_balance'] = 0;
+                $item['debit_count_for_balance'] = 0; $item['credit_count_for_balance'] = 0;
+                $allEntries[] = $item;
+            }
+
+            // 3. واکشی تسویه‌های فیزیکی (این بخش صحیح بود)
+            $sql_settlements = "
+                SELECT
+                    psi.id as entry_id, 'physical_settlement' as entry_type, ps.settlement_date as entry_date,
+                    ps.direction, ps.notes, p.name as product_name, psi.weight_scale, psi.carat, psi.weight_750,
+                    0 as debit_rial, 0 as credit_rial,
+                    (CASE WHEN ps.direction = 'outflow' THEN psi.weight_750 ELSE 0 END) as credit_weight_750,
+                    (CASE WHEN ps.direction = 'inflow' THEN psi.weight_750 ELSE 0 END) as debit_weight_750
+                FROM physical_settlement_items psi
+                JOIN physical_settlements ps ON psi.settlement_id = ps.id
+                JOIN products p ON psi.product_id = p.id
+                WHERE ps.contact_id = :contact_id
+                {$dateFilterSettle}
+            ";
+            $stmt_settle = $this->db->prepare($sql_settlements);
+            $stmt_settle->execute($baseParams);
+            $settlement_items = $stmt_settle->fetchAll(PDO::FETCH_ASSOC);
+            foreach($settlement_items as $item) {
+                $item['is_countable_display'] = false;
+                $item['display_debit'] = (float)($item['debit_weight_750'] ?? 0);
+                $item['display_credit'] = (float)($item['credit_weight_750'] ?? 0);
+                $item['debit_weight_for_balance'] = (float)($item['debit_weight_750'] ?? 0);
+                $item['credit_weight_for_balance'] = (float)($item['credit_weight_750'] ?? 0);
+                $item['debit_count_for_balance'] = 0;
+                $item['credit_count_for_balance'] = 0;
+                $allEntries[] = $item;
+            }
+
+            usort($allEntries, fn($a, $b) => strtotime($a['entry_date']) <=> strtotime($b['entry_date']));
+            return $allEntries;
+        } catch (Throwable $e) {
+            $this->logger->error("Error fetching unified ledger entries.", ['contact_id' => $contactId, 'exception' => $e]);
+            throw $e;
+        }
+    }
+    
+    /**
+     * (نهایی) مانده حساب یک مخاطب را تا قبل از یک تاریخ مشخص محاسبه می‌کند.
+     */
+    public function calculateBalanceBeforeDate(int $contactId, ?string $startDate): float
+    {
+        if (empty($startDate)) {
+            return 0.0;
+        }
+
+        $balance = 0.0;
+        $params = [':id' => $contactId, ':date' => $startDate];
+        try {
+            // فروش‌های تکمیل شده قبل از تاریخ شروع
+            $stmt = $this->db->prepare("SELECT SUM(final_payable_amount_rials) FROM transactions WHERE counterparty_contact_id = :id AND transaction_type = 'sell' AND delivery_status = 'completed' AND transaction_date < :date");
+            $stmt->execute($params);
+            $balance += (float)$stmt->fetchColumn();
+
+            // خریدهای تکمیل شده قبل از تاریخ شروع
+            $stmt = $this->db->prepare("SELECT SUM(final_payable_amount_rials) FROM transactions WHERE counterparty_contact_id = :id AND transaction_type = 'buy' AND delivery_status = 'completed' AND transaction_date < :date");
+            $stmt->execute($params);
+            $balance -= (float)$stmt->fetchColumn();
+
+            // پرداخت‌های او به ما قبل از تاریخ شروع
+            $stmt = $this->db->prepare("SELECT SUM(amount_rials) FROM payments WHERE paying_contact_id = :id AND payment_date < :date");
+            $stmt->execute($params);
+            $balance -= (float)$stmt->fetchColumn();
+
+            // پرداخت‌های ما به او قبل از تاریخ شروع
+            $stmt = $this->db->prepare("SELECT SUM(amount_rials) FROM payments WHERE receiving_contact_id = :id AND payment_date < :date");
+            $stmt->execute($params);
+            $balance += (float)$stmt->fetchColumn();
+
+        } catch (Throwable $e) {
+              $this->logger->error("Error calculating balance before date for contact ID {$contactId}", ['exception' => $e]);
+              throw $e;
+        }
+        return round($balance, 2);
+    }
 
     /**
-     * Retrieves lists of debtors and creditors based on calculated balances.
-     *
-     * @param float $threshold The minimum absolute balance to consider.
-     * @return array ['debtors' => array, 'creditors' => array]
+     * (بازنویسی کامل) لیست بدهکاران و بستانکاران را واکشی می‌کند.
      */
     public function getDebtorsAndCreditors(float $threshold = 0.01): array
     {
-        $this->logger->debug("Fetching debtors and creditors list.", ['threshold' => $threshold]);
         $debtors = [];
         $creditors = [];
-
         try {
-            // Query adapted from dash.php (calculates balance in SQL)
-            $sql_bal = "SELECT c.id, c.name, 
-                           SUM(COALESCE(m.amount, 0)) AS balance 
-                    FROM contacts c 
-                    LEFT JOIN (
-                        SELECT counterparty_contact_id AS cid, total_value_rials AS amount 
-                        FROM transactions 
-                        WHERE transaction_type = 'sell' AND counterparty_contact_id IS NOT NULL 
-                        UNION ALL 
-                        SELECT counterparty_contact_id AS cid, -total_value_rials 
-                        FROM transactions 
-                        WHERE transaction_type = 'buy' AND counterparty_contact_id IS NOT NULL 
-                        UNION ALL 
-                        SELECT paying_contact_id AS cid, -amount_rials 
-                        FROM payments 
-                        WHERE paying_contact_id IS NOT NULL 
-                        UNION ALL 
-                        SELECT receiving_contact_id AS cid, amount_rials 
-                        FROM payments 
-                        WHERE receiving_contact_id IS NOT NULL
-                    ) AS m ON c.id = m.cid 
-                    GROUP BY c.id, c.name 
-                    HAVING ABS(SUM(COALESCE(m.amount, 0))) > :thr 
-                    ORDER BY c.name ASC";
-            $stmt_bal = $this->db->prepare($sql_bal);
-            $stmt_bal->bindValue(':thr', $threshold, PDO::PARAM_STR); // Bind threshold as string for precision
-            $stmt_bal->execute();
-            $contact_bals = $stmt_bal->fetchAll(PDO::FETCH_ASSOC);
-
-            // Separate into debtors and creditors
-            foreach ($contact_bals as $cb) {
-                $bal = (float)$cb['balance'];
-                $contactInfo = ['id' => $cb['id'], 'name' => $cb['name'], 'balance' => $bal];
-                if ($bal > $threshold) {
-                    $debtors[] = $contactInfo;
-                } elseif ($bal < -$threshold) {
-                    $creditors[] = $contactInfo;
+            $allContacts = $this->getAll();
+            foreach ($allContacts as $contact) {
+                $balance = $this->calculateBalance((int)$contact['id']);
+                if (abs($balance) > $threshold) {
+                    $contactInfo = ['id' => $contact['id'], 'name' => $contact['name'], 'balance' => $balance];
+                    if ($balance > 0) $debtors[] = $contactInfo;
+                    else $creditors[] = $contactInfo;
                 }
             }
-
-            // Sort by balance amount (desc for debtors, asc for creditors)
             usort($debtors, fn($a, $b) => $b['balance'] <=> $a['balance']);
-            usort($creditors, fn($a, $b) => $a['balance'] <=> $b['balance']);
-
-            $this->logger->debug("Debtor/Creditor list fetched.", ['debtors' => count($debtors), 'creditors' => count($creditors)]);
-
+            usort($creditors, fn($a, $b) => abs($b['balance']) <=> abs($a['balance']));
         } catch (Throwable $e) {
-            $this->logger->error("Database error fetching debtors/creditors list.", ['exception' => $e]);
-            // Return empty lists on error
+            $this->logger->error("Error fetching debtors/creditors list.", ['exception' => $e]);
         }
-
         return ['debtors' => $debtors, 'creditors' => $creditors];
     }
 
@@ -321,35 +487,52 @@ class ContactRepository {
      * @param int $offset شروع رکورد
      * @return array ['contacts'=>[], 'total'=>int]
      */
-    public function searchAndPaginate(string $searchTerm, int $limit, int $offset): array {
+/**
+     * (اصلاح شده) تعداد کل مخاطبین را بر اساس عبارت جستجو می‌شمارد.
+     */
+    public function countFiltered(string $searchTerm = ''): int
+    {
+        $sql = "SELECT COUNT(id) FROM contacts";
         $params = [];
-        $where = '';
-        if ($searchTerm !== '') {
-            $where = "WHERE name LIKE :q1 OR type LIKE :q2 OR details LIKE :q3";
-            $params[':q1'] = '%' . $searchTerm . '%';
-            $params[':q2'] = '%' . $searchTerm . '%';
-            $params[':q3'] = '%' . $searchTerm . '%';
+        if (!empty($searchTerm)) {
+            $sql .= " WHERE name LIKE :search OR details LIKE :search";
+            $params[':search'] = '%' . $searchTerm . '%';
         }
-        // شمارش کل رکوردها
-        $sqlCount = "SELECT COUNT(*) FROM contacts $where";
-        $stmtCount = $this->db->prepare($sqlCount);
-        foreach ($params as $k => $v) $stmtCount->bindValue($k, $v);
-        $stmtCount->execute();
-        $total = (int)$stmtCount->fetchColumn();
-        // دریافت رکوردهای صفحه جاری
-        $sql = "SELECT id, name, type, details, credit_limit, created_at FROM contacts $where ORDER BY name ASC LIMIT :limit OFFSET :offset";
-        $stmt = $this->db->prepare($sql);
-        foreach ($params as $k => $v) $stmt->bindValue($k, $v);
-        $stmt->bindValue(':limit', $limit, \PDO::PARAM_INT);
-        $stmt->bindValue(':offset', $offset, \PDO::PARAM_INT);
-        $stmt->execute();
-        $contacts = $stmt->fetchAll(\PDO::FETCH_ASSOC);
-        return ['contacts'=>$contacts, 'total'=>$total];
+        try {
+            $stmt = $this->db->prepare($sql);
+            $stmt->execute($params);
+            return (int)$stmt->fetchColumn();
+        } catch (Throwable $e) {
+            $this->logger->error("Database error counting filtered contacts.", ['exception' => $e]);
+            return 0;
+        }
     }
 
-    // متدهای دیگر برای کار با Ledger, Transactions, Payments مربوط به مخاطب
-    // public function getLedgerEntries(int $contactId): array { /* ... */ }
-    // public function getTransactionsByContactId(int $contactId): array { /* ... */ }
-    // public function getPaymentsByContactId(int $contactId): array { /* ... */ }
-    // ...
+    /**
+     * (اصلاح شده) لیست مخاطبین را به صورت صفحه‌بندی شده و با جستجو برمی‌گرداند.
+     */
+    public function searchAndPaginate(string $searchTerm, int $limit, int $offset): array
+    {
+        $sql = "SELECT * FROM contacts";
+        $params = [];
+        if (!empty($searchTerm)) {
+            $sql .= " WHERE name LIKE :search OR details LIKE :search";
+            $params[':search'] = '%' . $searchTerm . '%';
+        }
+        $sql .= " ORDER BY name ASC LIMIT :limit OFFSET :offset";
+        $params[':limit'] = $limit;
+        $params[':offset'] = $offset;
+        
+        try {
+            $stmt = $this->db->prepare($sql);
+            foreach ($params as $key => &$value) {
+                $stmt->bindValue($key, $value, is_int($value) ? \PDO::PARAM_INT : \PDO::PARAM_STR);
+            }
+            $stmt->execute();
+            return $stmt->fetchAll(\PDO::FETCH_ASSOC);
+        } catch (Throwable $e) {
+            $this->logger->error("Database error fetching paginated contacts.", ['exception' => $e]);
+            return [];
+        }
+    }
 }

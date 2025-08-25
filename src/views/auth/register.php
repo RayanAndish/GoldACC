@@ -141,7 +141,7 @@ $oldInput = $viewData['oldInput'] ?? [];
         </div>
     </div>
 
-    <script src="js/bootstrap.bundle.min.js"></script>
+    <script src="<?php echo $baseUrl; ?>/js/bootstrap.bundle.min.js"></script>
     <script>
         // Optional: Add client-side validation if needed, although server-side is primary
     </script>

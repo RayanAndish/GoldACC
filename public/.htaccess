@@ -1,11 +1,11 @@
-RewriteEngine On
+<IfModule mod_rewrite.c>
+    RewriteEngine On
 
-# Redirect Trailing Slashes If Not A Folder...
-RewriteCond %{REQUEST_FILENAME} !-d
-RewriteCond %{REQUEST_URI} (.+)/$
-RewriteRule ^ %1 [L,R=301]
+    # اگر مسیر درخواست شده به صورت مستقیم به public/ اشاره می‌کند، آن را حذف کن
+    # RewriteBase /
 
-# Handle Front Controller...
-RewriteCond %{REQUEST_FILENAME} !-d
-RewriteCond %{REQUEST_FILENAME} !-f
-RewriteRule ^ index.php [L]
+    # اگر درخواست یک فایل یا پوشه واقعی نیست، آن را به index.php بفرست
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteRule . index.php [L]
+</IfModule>

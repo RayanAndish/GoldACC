@@ -23,7 +23,7 @@ $pendingReceiptDetails = $inventoryData['pending_receipt_details'] ?? [];
 $pendingDeliveryDetails = $inventoryData['pending_delivery_details'] ?? [];
 $capitalPerformanceData = $inventoryData['capital_performance'] ?? [];
 $summary = $inventoryData['summary'] ?? [
-    'total_750_equivalent_formatted' => Helper::formatNumber(0, 3),
+    'total_750_equivalent_formatted' => Helper::formatPersianNumber(0, 3), // Use Persian formatter
     'total_weight_value_formatted' => Helper::formatRial(0),
     'total_coin_value_formatted' => Helper::formatRial(0),
     'overall_total_value_formatted' => Helper::formatRial(0),
@@ -59,8 +59,8 @@ $hasCapitalPerformanceData = !empty($capitalPerformanceData);
     <div class="col-md-6 col-lg-3">
         <div class="card text-center h-100 shadow-sm border-secondary">
              <div class="card-body d-flex flex-column justify-content-center">
-                <h6 class="card-title text-muted small">جمع ارزش وزنی <small>(<?php echo $summary['value_method_is_real'] ? 'واقعی' : 'تخمینی'; ?>)</small></h6>
-                <p class="card-text fs-4 fw-bold mb-0 number-fa"><?php echo $summary['total_weight_value_formatted']; ?></p>
+                <h6 class="card-title text-muted small">جمع ارزش وزنی <small>(واقعی)</small></h6>
+                <p class="card-text fs-4 fw-bold mb-0 number-fa"><?php echo $summary['total_weight_value_formatted']; ?> <small>ریال</small></p>
             </div>
         </div>
     </div>
@@ -68,21 +68,21 @@ $hasCapitalPerformanceData = !empty($capitalPerformanceData);
         <div class="card text-center h-100 shadow-sm border-secondary">
             <div class="card-body d-flex flex-column justify-content-center">
                 <h6 class="card-title text-muted small">جمع ارزش سکه <small>(تخمینی)</small></h6>
-                <p class="card-text fs-4 fw-bold mb-0 number-fa"><?php echo $summary['total_coin_value_formatted']; ?></p>
+                <p class="card-text fs-4 fw-bold mb-0 number-fa"><?php echo $summary['total_coin_value_formatted']; ?> <small>ریال</small></p>
             </div>
         </div>
     </div>
      <div class="col-md-6 col-lg-3">
         <div class="card text-center h-100 shadow-sm border-success">
             <div class="card-body d-flex flex-column justify-content-center">
-                <h6 class="card-title text-muted small">جمع کل ارزش انبار <small>(<?php echo $summary['value_method_is_real'] ? 'بخش وزنی واقعی' : 'عمدتاً تخمینی'; ?>)</small></h6>
-                <p class="card-text fs-4 fw-bold mb-0 number-fa"><?php echo $summary['overall_total_value_formatted']; ?></p>
+                <h6 class="card-title text-muted small">جمع کل ارزش انبار <small>(بخش وزنی واقعی)</small></h6>
+                <p class="card-text fs-4 fw-bold mb-0 number-fa"><?php echo $summary['overall_total_value_formatted']; ?> <small>ریال</small></p>
             </div>
          </div>
     </div>
 </div> <?php // End Summary Row ?>
 
-<?php // --- Capital Performance Table --- (NEW) ?>
+<?php // --- Capital Performance Table --- (اصلاح شده) ?>
 <div class="card shadow-sm mb-4">
     <div class="card-header d-flex justify-content-between align-items-center bg-primary text-white">
         <h5 class="mb-0"><i class="fas fa-balance-scale me-2"></i>تراز عملکرد موجودی (نسبت به سرمایه هدف)</h5>
@@ -92,8 +92,7 @@ $hasCapitalPerformanceData = !empty($capitalPerformanceData);
             <table class="table table-striped table-hover table-sm table-bordered text-center align-middle mb-0">
                 <thead class="table-light">
                     <tr>
-                        <th>دسته‌بندی</th>
-                        <th>نام محصول</th>
+                        <th>نام محصول</th> <?php // تغییر از دسته‌بندی به نام محصول ?>
                         <th>موجودی هدف</th>
                         <th>موجودی فعلی</th>
                         <th>تراز</th>
@@ -113,8 +112,7 @@ $hasCapitalPerformanceData = !empty($capitalPerformanceData);
                                         ($item['status'] === 'excess' ? 'مازاد' : 'نرمال');
                         ?>
                         <tr class="<?php echo $statusClass; ?>">
-                            <td><?php echo Helper::escapeHtml($item['category_name'] ?? ''); ?></td>
-                            <td><?php echo Helper::escapeHtml($item['name'] ?? ''); ?></td>
+                            <td><?php echo Helper::escapeHtml($item['product_name'] ?? ''); ?></td>
                             <td class="number-fa"><?php echo $item['target_formatted'] ?? '-'; ?></td>
                             <td class="number-fa"><?php echo $item['current_formatted'] ?? '-'; ?></td>
                             <td class="number-fa fw-bold"><?php echo $item['balance_formatted'] ?? '-'; ?></td>
@@ -129,7 +127,7 @@ $hasCapitalPerformanceData = !empty($capitalPerformanceData);
                                     <div class="progress-bar <?php echo $progressClass; ?>" role="progressbar" 
                                         style="width: <?php echo $progressPercent; ?>%;" 
                                         aria-valuenow="<?php echo $progressPercent; ?>" aria-valuemin="0" aria-valuemax="200">
-                                        <?php echo Helper::formatNumber($item['balance_percent'] ?? 0, 0); ?>%
+                                        <?php echo Helper::formatPersianNumber($item['balance_percent'] ?? 0, 0); ?>%
                                     </div>
                                 </div>
                             </td>
@@ -138,7 +136,7 @@ $hasCapitalPerformanceData = !empty($capitalPerformanceData);
                         <?php endforeach; ?>
                     <?php else: ?>
                         <tr>
-                            <td colspan="7" class="text-center p-3">
+                            <td colspan="6" class="text-center p-3">
                                 <p>هیچ محصولی با موجودی هدف تعریف شده وجود ندارد.</p>
                                 <p class="small">برای مشاهده این بخش، مقادیر «سرمایه تعدادی» یا «سرمایه وزنی» را در تعریف محصولات تنظیم کنید.</p>
                             </td>
@@ -174,18 +172,18 @@ $hasCapitalPerformanceData = !empty($capitalPerformanceData);
                          </tr>
                     </thead>
                     <tbody>
-                        <?php foreach ($weightInventory as $item): ?>
+                       <?php foreach ($weightInventory as $item): ?>
                             <tr class="<?php echo ((float)($item['total_weight_grams'] ?? 0) < 0) ? 'table-danger' : ''; ?>">
-                                <td class="fw-bold number-fa"><?php echo $item['carat_formatted'] ?? '-'; ?></td>
-                                <td class="number-fa"><?php echo $item['total_weight_grams_formatted'] ?? '-'; ?></td>
-                                <td class="number-fa"><?php echo $item['equivalent_750_formatted'] ?? '-'; ?></td>
+                                <td class="fw-bold number-fa"><?php echo Helper::formatPersianNumber($item['carat'] ?? '-', 0); ?></td>
+                                <td class="number-fa"><?php echo Helper::formatPersianNumber($item['total_weight_grams'] ?? '-', 3); ?></td>
+                                <td class="number-fa"><?php echo Helper::formatPersianNumber($item['equivalent_750'] ?? '-', 3); ?></td>
                                  <?php if ($summary['value_method_is_real']): ?>
                                     <td class="number-fa small">
-                                         <?php echo $item['avg_buy_price_per_gram_formatted'] ?? '-'; ?>
+                                         <?php echo Helper::formatRial($item['avg_buy_price'] ?? 0); ?>
                                      </td>
                                  <?php endif; ?>
                                 <td class="number-fa text-end fw-bold">
-                                    <?php echo $item['value_display_formatted'] ?? '-'; ?>
+                                    <?php echo Helper::formatRial($item['value_display_raw'] ?? 0); ?>
                                 </td>
                             </tr>
                         <?php endforeach; ?>
@@ -193,7 +191,7 @@ $hasCapitalPerformanceData = !empty($capitalPerformanceData);
                      <tfoot class="table-light fw-bold">
                          <tr>
                              <th>جمع کل</th>
-                             <th class="number-fa"><?php echo Helper::formatNumber(array_sum(array_column($weightInventory, 'total_weight_grams')), 3); ?> <small>گرم</small></th>
+                             <th class="number-fa"><?php echo Helper::formatPersianNumber(array_sum(array_column($weightInventory, 'total_weight_grams')), 3); ?> <small>گرم</small></th>
                              <th class="number-fa"><?php echo $summary['total_750_equivalent_formatted']; ?> <small>گرم</small></th>
                              <th colspan="<?php echo $summary['value_method_is_real'] ? 2 : 1; ?>" class="number-fa text-end">
                                 <?php echo $summary['total_weight_value_formatted']; ?>
@@ -304,23 +302,33 @@ $hasCapitalPerformanceData = !empty($capitalPerformanceData);
                         </tr>
                     </thead>
                     <tbody>
-                        <?php foreach($pendingReceiptDetails as $tx): ?>
+                        <?php foreach($pendingReceiptDetails as $item): ?>
                         <tr>
-                            <td class="text-nowrap"><?php echo $tx['transaction_date_persian'] ?? '-'; ?></td>
-                            <td><?php echo $tx['product_type_farsi'] ?? '-'; ?></td>
-                            <td class="number-fa text-nowrap"><?php echo $tx['display_quantity_or_weight'] ?? '-'; ?></td>
-                            <td class="number-fa"><?php echo $tx['display_spec'] ?? '-'; ?></td>
-                            <td><?php echo $tx['counterparty_name'] ?? '-'; ?></td>
-                            <td><a href="<?php echo $baseUrl; ?>/app/transactions/edit/<?php echo (int)$tx['id']; ?>" target="_blank">#<?php echo (int)$tx['id']; ?></a></td>
+                            <td class="text-nowrap"><?php echo Helper::formatPersianDate($item['transaction_date'] ?? ''); ?></td>
+                            <td><?php echo Helper::escapeHtml($item['product_name'] ?? '-'); ?></td>
+                            <td class="number-fa text-nowrap">
+                                <?php if (($item['unit_of_measure'] ?? 'gram') === 'count'): ?>
+                                    <?php echo Helper::formatPersianNumber($item['quantity'] ?? 0, 0); ?> عدد
+                                <?php else: ?>
+                                    <?php echo Helper::formatPersianNumber($item['weight_grams'] ?? 0, 3); ?> گرم
+                                <?php endif; ?>
+                            </td>
+                            <td class="number-fa">
+                                <?php if (($item['unit_of_measure'] ?? 'gram') === 'count'): ?>
+                                    <?php echo Helper::escapeHtml($item['coin_year'] ?? '-'); ?>
+                                <?php else: ?>
+                                    <?php echo Helper::escapeHtml($item['carat'] ?? '-'); ?>
+                                <?php endif; ?>
+                            </td>
+                            <td><?php echo Helper::escapeHtml($item['counterparty_name'] ?? '-'); ?></td>
+                            <td><a href="<?php echo $baseUrl; ?>/app/transactions/edit/<?php echo (int)($item['transaction_id'] ?? 0); ?>" target="_blank">#<?php echo (int)($item['transaction_id'] ?? 0); ?></a></td>
                             <td class="text-center">
-                                <?php if (($tx['transaction_type'] ?? '') === 'buy'): ?>
-                                <form action="<?php echo $baseUrl; ?>/app/transactions/complete-delivery/<?php echo (int)$tx['id']; ?>/receipt" method="POST" class="d-inline" onsubmit="return confirm('آیا دریافت کالای معامله #<?php echo (int)$tx['id']; ?> را تایید می‌کنید؟ موجودی به‌روز خواهد شد.');">
+                                <form action="<?php echo $baseUrl; ?>/app/transactions/complete-delivery/<?php echo (int)($item['transaction_id'] ?? 0); ?>/receipt" method="POST" class="d-inline" onsubmit="return confirm('آیا دریافت کالای معامله #<?php echo (int)($item['transaction_id'] ?? 0); ?> را تایید می‌کنید؟ موجودی به‌روز خواهد شد.');">
                                     <input type="hidden" name="csrf_token" value="<?php echo $csrfToken; ?>">
                                     <button type="submit" class="btn btn-sm btn-success py-0 px-2" data-bs-toggle="tooltip" title="تایید دریافت و افزودن به موجودی">
                                         تایید دریافت
                                     </button>
                                 </form>
-                                <?php endif; ?>
                             </td>
                         </tr>
                         <?php endforeach; ?>
@@ -348,16 +356,28 @@ $hasCapitalPerformanceData = !empty($capitalPerformanceData);
                         </tr>
                     </thead>
                     <tbody>
-                        <?php foreach($pendingDeliveryDetails as $tx): ?>
+                        <?php foreach($pendingDeliveryDetails as $item): ?>
                         <tr>
-                            <td class="text-nowrap"><?php echo $tx['transaction_date_persian'] ?? '-'; ?></td>
-                            <td><?php echo $tx['product_type_farsi'] ?? '-'; ?></td>
-                            <td class="number-fa text-nowrap"><?php echo $tx['display_quantity_or_weight'] ?? '-'; ?></td>
-                            <td class="number-fa"><?php echo $tx['display_spec'] ?? '-'; ?></td>
-                            <td><?php echo $tx['counterparty_name'] ?? '-'; ?></td>
-                            <td><a href="<?php echo $baseUrl; ?>/app/transactions/edit/<?php echo (int)$tx['transaction_id']; ?>" target="_blank">#<?php echo (int)$tx['transaction_id']; ?></a></td>
+                            <td class="text-nowrap"><?php echo Helper::formatPersianDate($item['transaction_date'] ?? ''); ?></td>
+                            <td><?php echo Helper::escapeHtml($item['product_name'] ?? '-'); ?></td>
+                            <td class="number-fa text-nowrap">
+                                <?php if (($item['unit_of_measure'] ?? 'gram') === 'count'): ?>
+                                    <?php echo Helper::formatPersianNumber($item['quantity'] ?? 0, 0); ?> عدد
+                                <?php else: ?>
+                                    <?php echo Helper::formatPersianNumber($item['weight_grams'] ?? 0, 3); ?> گرم
+                                <?php endif; ?>
+                            </td>
+                            <td class="number-fa">
+                                <?php if (($item['unit_of_measure'] ?? 'gram') === 'count'): ?>
+                                    <?php echo Helper::escapeHtml($item['coin_year'] ?? '-'); ?>
+                                <?php else: ?>
+                                    <?php echo Helper::escapeHtml($item['carat'] ?? '-'); ?>
+                                <?php endif; ?>
+                            </td>
+                            <td><?php echo Helper::escapeHtml($item['counterparty_name'] ?? '-'); ?></td>
+                            <td><a href="<?php echo $baseUrl; ?>/app/transactions/edit/<?php echo (int)($item['transaction_id'] ?? 0); ?>" target="_blank">#<?php echo (int)($item['transaction_id'] ?? 0); ?></a></td>
                             <td class="text-center">
-                                <form action="<?php echo $baseUrl; ?>/app/transactions/complete-delivery/<?php echo (int)$tx['transaction_id']; ?>/delivery" method="POST" class="d-inline" onsubmit="return confirm('آیا تحویل کالای معامله #<?php echo (int)$tx['transaction_id']; ?> را تایید می‌کنید؟');">
+                                <form action="<?php echo $baseUrl; ?>/app/transactions/complete-delivery/<?php echo (int)($item['transaction_id'] ?? 0); ?>/delivery" method="POST" class="d-inline" onsubmit="return confirm('آیا تحویل کالای معامله #<?php echo (int)($item['transaction_id'] ?? 0); ?> را تایید می‌کنید؟');">
                                     <input type="hidden" name="csrf_token" value="<?php echo $csrfToken; ?>">
                                     <button type="submit" class="btn btn-sm btn-warning py-0 px-2 text-dark" data-bs-toggle="tooltip" title="تایید تحویل">
                                         تایید تحویل

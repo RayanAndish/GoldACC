@@ -61,8 +61,11 @@ class InitialBalanceService
             // ذخیره موجودی اولیه
             $initialBalanceId = $this->initialBalanceRepository->createInitialBalance($data);
 
+            // CRITICAL FIX: Record this initial balance in the inventory ledger
+            $this->inventoryRepository->addInitialBalanceToLedger($data, $initialBalanceId);
+
             // ثبت در لاگ
-            $this->logger->info("Initial balance created", [
+            $this->logger->info("Initial balance created and recorded in ledger", [
                 'initial_balance_id' => $initialBalanceId,
                 'product_id' => $data['product_id'],
                 'product_type' => $product['type'],

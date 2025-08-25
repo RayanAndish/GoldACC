@@ -92,7 +92,6 @@ $monthlyChartData = $dashboardData['monthly_chart_data'] ?? ($viewData['monthly_
     .card-header { background-color: #fff; border-bottom: 1px solid #e9ecef; font-weight: 600; color: #343a40; padding: 0.8rem 1.25rem; }
     .list-group-item { border-color: rgba(0,0,0,0.05); }
     .table { font-size: 0.9rem; }
-    .number-to-format { /* کلاس جدید برای AutoNumeric */ }
     .badge { font-size: 0.75em; padding: 0.4em 0.6em; }
 
     /* Chart specific styles */
@@ -136,15 +135,18 @@ $monthlyChartData = $dashboardData['monthly_chart_data'] ?? ($viewData['monthly_
             <div class="stat-icon"><i class="fas fa-balance-scale-right"></i></div>
             <span class="stat-label">موجودی طلای معادل ۷۵۰</span>
             <div class="stat-value">
-        <span class="number-to-format" data-autonumeric-options='{"decimalPlaces": 3}'><?php echo $total750Equivalent; ?></span><span class="stat-unit">گرم</span>
-    </div>
+                <span><?php echo Helper::formatPersianNumber($total750Equivalent, 3); ?></span><span class="stat-unit">گرم</span>
+            </div>
         </div>
     </div>
     <div class="col-md-6 col-lg-4" data-aos="fade-up" data-aos-delay="100">
         <div class="stat-card shadow-sm">
             <div class="stat-icon"><i class="fas fa-university"></i></div>
             <span class="stat-label">موجودی کل نقدی</span>
-            <div class="stat-value number-to-format" data-autonumeric-options='{"currencySymbol": " ریال", "currencySymbolPlacement": "s", "decimalPlaces": 0, "digitGroupSeparator": ","}'><?php echo $bankCashBalance; ?></div>        </div>
+            <div class="stat-value">
+                <span><?php echo Helper::formatPersianNumber($bankCashBalance, 0); ?></span><span class="stat-unit">ریال</span>
+            </div>
+        </div>
     </div>
     <?php // Optional: Add more stat cards here, e.g., total coins, pending value ?>
      <div class="col-md-6 col-lg-4" data-aos="fade-up" data-aos-delay="200">
@@ -153,9 +155,9 @@ $monthlyChartData = $dashboardData['monthly_chart_data'] ?? ($viewData['monthly_
             <div class="stat-icon"><i class="fas fa-coins"></i></div>
             <span class="stat-label">تعداد کل سکه</span>
             <?php $totalCoins = 0; foreach($coinInventoryItems as $ci) { $totalCoins += (int)($ci['quantity'] ?? 0); } ?>
-                <div class="stat-value">
-        <span class="number-to-format" data-autonumeric-options='{"decimalPlaces": 0, "digitGroupSeparator": ","}'><?php echo $totalCoins; ?></span><span class="stat-unit">عدد</span>
-    </div>
+            <div class="stat-value">
+                <span><?php echo Helper::formatPersianNumber($totalCoins, 0); ?></span><span class="stat-unit">عدد</span>
+            </div>
         </div>
     </div>
 </div>
@@ -205,15 +207,19 @@ $monthlyChartData = $dashboardData['monthly_chart_data'] ?? ($viewData['monthly_
                 <div class="row">
                     <?php // Pending Receipts ?>
                     <div class="col-md-6 border-end-md mb-3 mb-md-0 pe-md-3">
-                        <h6 class="small fw-bold mb-2"><i class="fas fa-arrow-down text-success me-1"></i>کالای دریافتنی <small>(از دیگران)</small></h6>
+                        <h6 class="small fw-bold mb-2"><i class="fas fa-arrow-down text-success me-1"></i>باید دریافت کنیم<small>(از دیگران)</small></h6>
                         <?php if (!empty($pendingReceiptSummary)): ?>
                             <ul class="list-unstyled small mb-0">
                                 <?php foreach ($pendingReceiptSummary as $item): ?>
                                     <li class="d-flex justify-content-between mb-1 pb-1 border-bottom">
-                                    <span class="text-truncate product-type-display" data-product-type="<?php echo htmlspecialchars($item['gold_product_type'] ?? '', ENT_QUOTES, 'UTF-8'); ?>" title="<?php echo htmlspecialchars($item['gold_product_type'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($item['gold_product_type'] ?? '', ENT_QUOTES, 'UTF-8'); ?><?php if(!empty($item['gold_carat']) && $item['gold_carat'] != 0) echo'<small class="text-muted"> ('.htmlspecialchars($item['gold_carat'], ENT_QUOTES, 'UTF-8').')</small>';?></span>
-                                    <strong class="text-nowrap text-end ps-1">
-                                        <span class="number-to-format" data-autonumeric-options='{"decimalPlaces": <?php echo (isset($item['total_qty']) && $item['total_qty'] > 0) ? 0 : 3; ?>, "digitGroupSeparator": ","}'><?php echo (isset($item['total_qty']) && $item['total_qty'] > 0) ? ($item['total_qty'] ?? 0) : ($item['total_weight'] ?? 0); ?></span><small class="ms-1"><?php echo (isset($item['total_qty']) && $item['total_qty'] > 0) ? 'عدد' : 'گرم'; ?></small>
-                                    </strong>
+                                        <span class="text-truncate product-type-display" data-product-type="<?php echo htmlspecialchars($item['product_category'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($item['product_category'] ?? 'نامشخص', ENT_QUOTES, 'UTF-8'); ?></span>
+                                        <strong class="text-nowrap text-end ps-1">
+                                            <?php if (!empty($item['total_weight_750']) && $item['total_weight_750'] > 0): ?>
+                                                <span><?php echo Helper::formatPersianNumber($item['total_weight_750'], 3); ?></span><small class="ms-1">گرم</small>
+                                            <?php elseif (!empty($item['total_quantity'])): ?>
+                                                <span><?php echo Helper::formatPersianNumber($item['total_quantity'], 0); ?></span><small class="ms-1">عدد</small>
+                                            <?php endif; ?>
+                                        </strong>
                                      </li>
                                  <?php endforeach; ?>
                             </ul>
@@ -221,15 +227,19 @@ $monthlyChartData = $dashboardData['monthly_chart_data'] ?? ($viewData['monthly_
                      </div>
                      <?php // Pending Deliveries ?>
                     <div class="col-md-6 ps-md-3">
-                        <h6 class="small fw-bold mb-2"><i class="fas fa-arrow-up text-warning me-1"></i>کالای تحویلی <small>(به دیگران)</small></h6>
+                        <h6 class="small fw-bold mb-2"><i class="fas fa-arrow-up text-warning me-1"></i>باید تحویل دهیم<small>(به دیگران)</small></h6>
                          <?php if (!empty($pendingDeliverySummary)): ?>
                             <ul class="list-unstyled small mb-0">
                                 <?php foreach ($pendingDeliverySummary as $item): ?>
                                     <li class="d-flex justify-content-between mb-1 pb-1 border-bottom">
-                                    <span class="text-truncate product-type-display" data-product-type="<?php echo htmlspecialchars($item['gold_product_type'] ?? '', ENT_QUOTES, 'UTF-8'); ?>" title="<?php echo htmlspecialchars($item['gold_product_type'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($item['gold_product_type'] ?? '', ENT_QUOTES, 'UTF-8'); ?><?php if(!empty($item['gold_carat']) && $item['gold_carat'] != 0) echo'<small class="text-muted"> ('.htmlspecialchars($item['gold_carat'], ENT_QUOTES, 'UTF-8').')</small>';?></span>
-                                    <strong class="text-nowrap text-end ps-1">
-                                        <span class="number-to-format" data-autonumeric-options='{"decimalPlaces": <?php echo (isset($item['total_qty']) && $item['total_qty'] > 0) ? 0 : 3; ?>, "digitGroupSeparator": ","}'><?php echo (isset($item['total_qty']) && $item['total_qty'] > 0) ? ($item['total_qty'] ?? 0) : ($item['total_weight'] ?? 0); ?></span><small class="ms-1"><?php echo (isset($item['total_qty']) && $item['total_qty'] > 0) ? 'عدد' : 'گرم'; ?></small>
-                                    </strong>
+                                        <span class="text-truncate product-type-display" data-product-type="<?php echo htmlspecialchars($item['product_category'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($item['product_category'] ?? 'نامشخص', ENT_QUOTES, 'UTF-8'); ?></span>
+                                        <strong class="text-nowrap text-end ps-1">
+                                            <?php if (!empty($item['total_weight_750']) && $item['total_weight_750'] > 0): ?>
+                                                <span><?php echo Helper::formatPersianNumber($item['total_weight_750'], 3); ?></span><small class="ms-1">گرم</small>
+                                            <?php elseif (!empty($item['total_quantity'])): ?>
+                                                <span><?php echo Helper::formatPersianNumber($item['total_quantity'], 0); ?></span><small class="ms-1">عدد</small>
+                                            <?php endif; ?>
+                                        </strong>
                                      </li>
                                 <?php endforeach; ?>
                             </ul>
@@ -258,7 +268,7 @@ $monthlyChartData = $dashboardData['monthly_chart_data'] ?? ($viewData['monthly_
                             <?php foreach ($coinInventoryItems as $index => $item): ?>
                                 <tr>
                                 <td class="py-2 coin-type-display" data-coin-type="<?php echo htmlspecialchars($item['coin_type'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"> <i class="fas fa-circle fa-xs me-2" style="color: <?php echo $weightBackgroundColors[$index % count($weightBackgroundColors)] ?? '#6c757d'; ?>"></i> <?php echo htmlspecialchars($item['coin_type'] ?? '', ENT_QUOTES, 'UTF-8'); // نمایش کد نوع سکه ?></td>
-                                    <td class="text-end number-to-format fw-bold py-2" data-autonumeric-options='{"decimalPlaces": 0}'><?php echo $item['quantity'] ?? '0'; ?> <small>عدد</small></td>
+                                    <td class="text-end fw-bold py-2"><?php echo Helper::formatPersianNumber($item['quantity'] ?? 0, 0); ?> <small>عدد</small></td>
                                 </tr>
                             <?php endforeach; ?>
                         </tbody>
@@ -281,18 +291,15 @@ $monthlyChartData = $dashboardData['monthly_chart_data'] ?? ($viewData['monthly_
                         <?php foreach ($recentTransactions as $tx): ?>
                             <li class="list-group-item d-flex justify-content-between align-items-center flex-wrap gap-1 py-2 px-3">
                                 <div class="text-truncate">
-                                    <span class="badge bg-<?php echo ($tx['transaction_type'] ?? '') === 'buy' ? 'success' : (($tx['transaction_type'] ?? '') === 'sell' ? 'danger' : 'secondary'); ?> me-1"><?php echo htmlspecialchars($tx['transaction_type_farsi'] ?? $tx['transaction_type'] ?? 'N/A', ENT_QUOTES, 'UTF-8'); ?></span>
-                                    <strong class="product-type-display" data-product-type="<?php echo htmlspecialchars($tx['gold_product_type'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($tx['gold_product_type'] ?? 'محصول نامشخص', ENT_QUOTES, 'UTF-8'); ?></strong>
-                                    <?php if (!empty($tx['product_name'])): ?>
-                                        <small class="text-muted">(<?php echo htmlspecialchars($tx['product_name'], ENT_QUOTES, 'UTF-8'); ?>)</small>
-                                    <?php endif; ?>
+                                    <span class="badge bg-<?php echo ($tx['transaction_type'] ?? '') === 'buy' ? 'success' : (($tx['transaction_type'] ?? '') === 'sell' ? 'danger' : 'secondary'); ?> me-1"><?php echo htmlspecialchars(($tx['transaction_type'] ?? '') === 'buy' ? 'خرید' : 'فروش', ENT_QUOTES, 'UTF-8'); ?></span>
+                                    <strong><?php echo htmlspecialchars($tx['product_name'] ?? 'محصول نامشخص', ENT_QUOTES, 'UTF-8'); ?></strong>
                                     <?php if (!empty($tx['counterparty_name'])): ?>
                                         <br><small class="text-muted"><i class="fas fa-user fa-xs me-1"></i><?php echo htmlspecialchars($tx['counterparty_name'], ENT_QUOTES, 'UTF-8'); ?></small>
                                     <?php endif; ?>
                                 </div>
                                 <div class="text-nowrap text-end">
-                                    <span class="number-to-format fw-bold" data-autonumeric-options='{"decimalPlaces": 2}'><?php echo $tx['total_value_rials'] ?? '0'; ?></span>
-                                    <small class="text-muted d-block date-display"><?php echo $tx['transaction_date'] ?? ''; // نمایش تاریخ خام ?></small>
+                                    <span class="fw-bold"><?php echo Helper::formatPersianNumber($tx['final_payable_amount_rials'] ?? 0, 0); ?></span>
+                                    <small class="text-muted d-block date-display"><?php echo Helper::formatPersianDate($tx['transaction_date'] ?? ''); ?></small>
                                 </div>
                             </li>
                          <?php endforeach; ?>
@@ -327,8 +334,8 @@ $monthlyChartData = $dashboardData['monthly_chart_data'] ?? ($viewData['monthly_
                                     <?php endif; ?>
                                 </div>
                                 <div class="text-nowrap text-end">
-                                    <strong class="number-to-format" data-autonumeric-options='{"currencySymbol": " ریال", "currencySymbolPlacement": "s", "decimalPlaces": 0}'><?php echo $payment['amount_rials'] ?? '0'; ?></strong>
-                                    <small class="text-muted d-block date-display"><?php echo $payment['payment_date'] ?? ''; // نمایش تاریخ خام ?></small>
+                                    <strong class="fw-bold"><?php echo Helper::formatPersianNumber($payment['amount_rials'] ?? 0, 0); ?></strong>
+                                    <small class="text-muted d-block date-display"><?php echo Helper::formatPersianDate($payment['payment_date'] ?? ''); ?></small>
                                 </div>
                             </li>
                         <?php endforeach; ?>
@@ -355,7 +362,7 @@ $monthlyChartData = $dashboardData['monthly_chart_data'] ?? ($viewData['monthly_
                             <?php foreach ($debtorsList as $contact): ?>
                                     <li class="d-flex justify-content-between mb-1 pb-1 border-bottom">
                                         <span class="text-truncate" title="<?php echo htmlspecialchars($contact['name'] ?? 'ناشناس', ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($contact['name'] ?? 'ناشناس', ENT_QUOTES, 'UTF-8'); ?></span>
-                                        <strong class="text-nowrap number-to-format text-danger text-end ps-1" data-autonumeric-options='{"currencySymbol": " ریال", "currencySymbolPlacement": "s", "decimalPlaces": 0}'><?php echo $contact['balance'] ?? '0'; ?></strong>
+                                        <strong class="text-nowrap text-danger text-end ps-1"><?php echo Helper::formatPersianNumber($contact['balance'] ?? 0, 0); ?></strong>
                                     </li>
                                     <?php endforeach; ?>
                             </ul>
@@ -368,7 +375,7 @@ $monthlyChartData = $dashboardData['monthly_chart_data'] ?? ($viewData['monthly_
                              <?php foreach ($creditorsList as $contact): ?>
                                     <li class="d-flex justify-content-between mb-1 pb-1 border-bottom">
                                          <span class="text-truncate" title="<?php echo htmlspecialchars($contact['name'] ?? 'ناشناس', ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($contact['name'] ?? 'ناشناس', ENT_QUOTES, 'UTF-8'); ?></span>
-                                         <strong class="text-nowrap number-to-format text-success text-end ps-1" data-autonumeric-options='{"currencySymbol": " ریال", "currencySymbolPlacement": "s", "decimalPlaces": 0}'><?php echo $contact['balance'] ?? '0'; ?></strong>
+                                         <strong class="text-nowrap text-success text-end ps-1"><?php echo Helper::formatPersianNumber($contact['balance'] ?? 0, 0); ?></strong>
                                      </li>
                                      <?php endforeach; ?>
                               </ul>
@@ -385,7 +392,6 @@ $monthlyChartData = $dashboardData['monthly_chart_data'] ?? ($viewData['monthly_
     <?php // --- JavaScript for Charts, AutoNumeric, and Dynamic Content --- ?>
 <script src="<?php echo htmlspecialchars($baseUrl, ENT_QUOTES, 'UTF-8'); ?>/js/chart.min.js"></script>
 <script src="<?php echo htmlspecialchars($baseUrl, ENT_QUOTES, 'UTF-8'); ?>/js/aos.js"></script>
-<script src="<?php echo htmlspecialchars($baseUrl, ENT_QUOTES, 'UTF-8'); ?>/js/autoNumeric.min.js"></script>
 <script src="<?php echo htmlspecialchars($baseUrl, ENT_QUOTES, 'UTF-8'); ?>/js/messages.js"></script>
 
 <script>
@@ -394,25 +400,6 @@ function initializeDashboard() {
         AOS.init({ duration: 600, once: true });
     } else {
         console.error('AOS library is not loaded when initializeDashboard was called.');
-    }
-
-    // Initialize AutoNumeric
-    if (typeof AutoNumeric === 'function') {
-        const numericElements = document.querySelectorAll('.number-to-format');
-        numericElements.forEach(el => {
-            try {
-                let options = {};
-                if (el.dataset.autonumericOptions) {
-                    options = JSON.parse(el.dataset.autonumericOptions);
-                }
-                new AutoNumeric(el, options);
-            } catch (e) {
-                console.error("Error initializing AutoNumeric for element:", el, e);
-            }
-        });
-        console.log('AutoNumeric instances created successfully using new AutoNumeric().');
-    } else {
-        console.error('AutoNumeric constructor is not available.');
     }
 
     // Translate product types, coin types, payment directions using MESSAGES

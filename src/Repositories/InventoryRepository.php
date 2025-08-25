@@ -1,6 +1,6 @@
 <?php
-
-namespace App\Repositories; // Namespace مطابق با پوشه src/Repositories
+// src/Repositories/InventoryRepository.php
+namespace App\Repositories;
 
 use PDO;
 use PDOException;
@@ -9,7 +9,8 @@ use Exception;
 use Throwable;
 
 /**
- * کلاس InventoryRepository برای تعامل با جدول پایگاه داده inventory (موجودی طلا بر اساس عیار).
+ * REVISED: InventoryRepository class to manage carat-based inventory (often for gold and precious metals)
+ * Provides methods for updating and summarizing physical stock based on carats.
  */
 class InventoryRepository {
 
@@ -22,192 +23,101 @@ class InventoryRepository {
     }
 
     /**
-     * به‌روزرسانی موجودی طلا بر اساس عیار.
-     * منطق از complete_delivery.php گرفته شده.
-     * از INSERT ... ON DUPLICATE KEY UPDATE استفاده می کند.
-     *
-     * @param int $carat عیار طلا.
-     * @param float $weightChange تغییر در وزن (گرم). مثبت برای افزایش، منفی برای کاهش.
-     * @param float $valueChange تغییر در ارزش (ریال). مثبت برای افزایش، منفی برای کاهش.
-     * @return bool True اگر عملیات موفقیت آمیز بود.
+     * Updates gold inventory by carat. Uses INSERT ... ON DUPLICATE KEY UPDATE.
+     * `total_value_rials` is an accumulative field in this specific `inventory` table
+     * that directly reflects stock value at purchase/sale prices for a specific carat.
+     * This update assumes that changes to inventory value can be simply added/subtracted,
+     * which might be simplistic for complex FIFO/LIFO cost accounting but aligns with simpler tracking.
+     * @param int $carat The carat of the gold.
+     * @param float $weightChange The change in weight (grams). Positive for increase, negative for decrease.
+     * @param float $valueChange The change in total value (rials) at purchase/sale price.
+     * @return bool True if operation was successful.
      * @throws PDOException.
      */
     public function updateInventoryByCarat(int $carat, float $weightChange, float $valueChange): bool {
-        $this->logger->info("Updating inventory for carat {$carat}.", ['weight_change' => $weightChange, 'value_change' => $valueChange]);
+        $this->logger->info("Updating physical inventory (inventory table) for carat {$carat}.", ['weight_change' => $weightChange, 'value_change' => $valueChange]);
         try {
-            // ID در جدول inventory روی carat UNIQUE INDEX دارد (بر اساس SQL dump شما)
-            // بنابراین می توان از ON DUPLICATE KEY UPDATE استفاده کرد.
             $sql = "
                 INSERT INTO inventory (carat, total_weight_grams, total_value_rials, last_updated)
-                VALUES (:c, :w, :v, CURRENT_TIMESTAMP)
+                VALUES (:carat, :weight, :value, CURRENT_TIMESTAMP)
                 ON DUPLICATE KEY UPDATE 
                     total_weight_grams = total_weight_grams + VALUES(total_weight_grams),
                     total_value_rials = total_value_rials + VALUES(total_value_rials),
                     last_updated = CURRENT_TIMESTAMP
             ";
             $stmt = $this->db->prepare($sql);
-            $stmt->bindValue(':c', $carat, PDO::PARAM_INT);
-            $stmt->bindValue(':w', $weightChange, PDO::PARAM_STR); // Bind as STR for DECIMAL precision
-            $stmt->bindValue(':v', $valueChange, PDO::PARAM_STR);
+            $stmt->bindValue(':carat', $carat, PDO::PARAM_INT);
+            // Binding as STR for DECIMAL precision is crucial for large numbers or high precision.
+            $stmt->bindValue(':weight', $weightChange, PDO::PARAM_STR); 
+            $stmt->bindValue(':value', $valueChange, PDO::PARAM_STR);
             $executed = $stmt->execute();
 
             if ($executed) {
-                 $this->logger->info("Inventory updated successfully for carat {$carat}.", ['rows_affected' => $stmt->rowCount()]);
+                 $this->logger->info("Physical inventory updated successfully for carat {$carat}.", ['rows_affected' => $stmt->rowCount()]);
             } else {
-                 $this->logger->error("Failed to execute inventory update query for carat {$carat}.");
+                 $this->logger->error("Failed to execute physical inventory update query for carat {$carat}.");
             }
-
             return $executed;
-
         } catch (PDOException $e) {
-            $this->logger->error("Database error updating inventory for carat {$carat}: " . $e->getMessage(), ['exception' => $e]);
-            throw $e;
-        } catch (Throwable $e) {
-             $this->logger->error("Error updating inventory for carat {$carat}: " . $e->getMessage(), ['exception' => $e]);
+            $this->logger->error("Database error updating physical inventory for carat {$carat}: " . $e->getMessage(), ['exception' => $e]);
+            throw $e; // Re-throw so TransactionService can rollback.
+        } catch (Throwable $e) { // Catch all throwables in case of other errors (e.g., type errors during binding).
+             $this->logger->error("Unexpected error updating physical inventory for carat {$carat}: " . $e->getMessage(), ['exception' => $e]);
              throw $e;
         }
     }
 
-    // متدهای دیگر برای خواندن موجودی (getAllInventory, getInventoryByCarat)
-
     /**
-     * Retrieves a summary of all gold inventory grouped by carat.
-     *
-     * @return array Associative array of inventory items, or empty array on error/no data.
-     *               Each item contains: 'carat', 'total_weight_grams', 'total_value_rials'.
+     * (اصلاح شده) خلاصه‌ای از موجودی وزنی را بر اساس جمع جبری خرید و فروش‌های تکمیل شده محاسبه می‌کند.
+     * این روش ساده و قابل اطمینان است و مشکل خالی بودن جداول و نمودارها را حل می‌کند.
+     * @return array
      */
     public function getAllInventorySummary(): array
     {
-        $this->logger->debug("Calculating weight inventory summary using real FIFO logic.");
+        $this->logger->debug("Calculating weight inventory summary using direct SUM/SUBTRACT logic.");
         try {
-            // همه تراکنش‌های تکمیل‌شده وزنی (آبشده، ساخته‌شده، دست دوم و ...)
-            $sql = "SELECT
-                        t.id as transaction_main_id,
-                        t.transaction_type,
-                        t.transaction_date,
-                        t.price_per_reference_gram, -- قیمت مرجع از جدول transactions
-                        ti.id as transaction_item_id,
-                        ti.weight_grams,            -- وزن از جدول transaction_items
-                        ti.carat                    -- عیار از جدول transaction_items
-                    FROM
-                        transactions t
-                    JOIN
-                        transaction_items ti ON t.id = ti.transaction_id
-                    WHERE
-                        ti.weight_grams > 0 AND ti.carat IS NOT NULL AND t.delivery_status = 'completed'
-                    ORDER BY
-                        t.transaction_date ASC, t.id ASC";
+            // این کوئری مجموع وزن و ارزش خریدها و فروش‌های تکمیل شده را برای هر عیار محاسبه می‌کند
+            $sql = "
+                SELECT
+                    ti.carat,
+                    SUM(CASE WHEN t.transaction_type = 'buy' THEN ti.weight_grams ELSE 0 END) as total_buy_weight,
+                    SUM(CASE WHEN t.transaction_type = 'buy' THEN ti.total_value_rials ELSE 0 END) as total_buy_value,
+                    SUM(CASE WHEN t.transaction_type = 'sell' THEN ti.weight_grams ELSE 0 END) as total_sell_weight,
+                    SUM(CASE WHEN t.transaction_type = 'sell' THEN ti.total_value_rials ELSE 0 END) as total_sell_value
+                FROM transaction_items ti
+                JOIN transactions t ON ti.transaction_id = t.id
+                JOIN products p ON ti.product_id = p.id
+                WHERE
+                    p.unit_of_measure = 'gram'
+                    AND t.delivery_status = 'completed'
+                    AND ti.carat IS NOT NULL
+                GROUP BY ti.carat
+            ";
+            
             $stmt = $this->db->query($sql);
-            $transactions_data = $stmt->fetchAll(PDO::FETCH_ASSOC);
-            if (!$transactions_data) return [];
-
-            // گروه‌بندی تراکنش‌ها بر اساس عیار
-            $byCarat = [];
-            foreach ($transactions_data as $tx) {
-                $carat = (int)$tx['carat']; // استفاده از tx['carat'] از transaction_items
-                $byCarat[$carat][] = $tx;
-            }
+            $raw_summary = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
             $result = [];
-            foreach ($byCarat as $carat => $txs) {
-                // FIFO واقعی برای هر عیار
-                $fifo = [];
-                $totalSold = 0;
-                foreach ($txs as $tx) {
-                    if ($tx['transaction_type'] === 'buy') {
-                        $qty = floatval($tx['weight_grams'] ?? 0); // استفاده از tx['weight_grams']
-                        $price = floatval($tx['price_per_reference_gram'] ?? 0); // استفاده از tx['price_per_reference_gram']
-                        if ($qty > 0 && $price > 0) {
-                            $fifo[] = [ 'qty' => $qty, 'price' => $price ];
-                        }
-                    } elseif ($tx['transaction_type'] === 'sell') {
-                        $totalSold += floatval($tx['weight_grams'] ?? 0); // استفاده از tx['weight_grams']
-                    }
-                }
-                // کسر فروش‌ها از خریدها (FIFO)
-                foreach ($fifo as &$buy) {
-                    if ($totalSold <= 0) break;
-                    if ($buy['qty'] <= $totalSold) {
-                        $totalSold -= $buy['qty'];
-                        $buy['qty'] = 0;
-                    } else {
-                        $buy['qty'] -= $totalSold;
-                        $totalSold = 0;
-                    }
-                }
-                unset($buy);
-                $stock = 0;
-                $weightedSum = 0;
-                foreach ($fifo as $buy) {
-                    $stock += $buy['qty'];
-                    $weightedSum += $buy['qty'] * $buy['price'];
-                }
-                if ($stock > 0) {
-                    $avgPrice = $weightedSum / $stock;
+            foreach ($raw_summary as $row) {
+                $current_weight = (float)$row['total_buy_weight'] - (float)$row['total_sell_weight'];
+                $current_value = (float)$row['total_buy_value'] - (float)$row['total_sell_value'];
+
+                // فقط در صورتی که موجودی وزنی مثبت باشد، آن را نمایش بده
+                if ($current_weight > 0.001) {
                     $result[] = [
-                        'carat' => $carat,
-                        'total_weight_grams' => $stock,
-                        'avg_buy_price' => $avgPrice,
-                        'total_value_rials' => $stock * $avgPrice,
+                        'carat' => (int)$row['carat'],
+                        'total_weight_grams' => $current_weight,
+                        'total_value_rials' => $current_value,
+                        'avg_buy_price' => $current_value / $current_weight,
                     ];
                 }
             }
-            $this->logger->debug("Weight inventory summary (FIFO) calculated.", ['count' => count($result)]);
+            
+            $this->logger->debug("Weight inventory summary calculated.", ['count' => count($result)]);
             return $result;
         } catch (Throwable $e) {
-            $this->logger->error("Error calculating FIFO weight inventory summary: " . $e->getMessage(), ['exception' => $e]);
+            $this->logger->error("Error calculating weight inventory summary: " . $e->getMessage(), ['exception' => $e]);
             return [];
         }
-    }
-
-    /**
-     * محاسبه موجودی و میانگین قیمت خرید با الگوریتم FIFO برای کالاهای وزنی و تعدادی
-     * @param array $transactions آرایه تراکنش‌ها (خرید و فروش تکمیل‌شده)
-     * @param string $productType نوع کالا (مثلاً melted یا coin_emami)
-     * @param string $mode 'weight' برای کالاهای وزنی، 'quantity' برای تعدادی
-     * @return array ['stock' => float, 'avg_price' => float]
-     */
-    public static function calculateFIFOStockAndAvgPrice(array $transactions, string $productType, string $mode = 'weight'): array {
-        $buys = [];
-        $totalSold = 0;
-        $qtyField = $mode === 'weight' ? 'weight_grams' : 'quantity';
-        $priceField = $mode === 'weight' ? 'price_per_reference_gram' : 'unit_price';
-        foreach ($transactions as $tx) {
-            if (($tx['product_type'] ?? null) !== $productType || ($tx['delivery_status'] ?? null) !== 'completed') continue;
-            if (($tx['transaction_type'] ?? null) === 'buy') {
-                $qty = floatval($tx[$qtyField] ?? 0);
-                $price = floatval($tx[$priceField] ?? 0);
-                if ($qty > 0 && $price > 0) {
-                    $buys[] = [
-                        'qty' => $qty,
-                        'price' => $price,
-                    ];
-                }
-            } elseif (($tx['transaction_type'] ?? null) === 'sell') {
-                $totalSold += floatval($tx[$qtyField] ?? 0);
-            }
-        }
-        foreach ($buys as &$buy) {
-            if ($totalSold <= 0) break;
-            if ($buy['qty'] <= $totalSold) {
-                $totalSold -= $buy['qty'];
-                $buy['qty'] = 0;
-            } else {
-                $buy['qty'] -= $totalSold;
-                $totalSold = 0;
-            }
-        }
-        unset($buy);
-        $stock = 0;
-        $weightedSum = 0;
-        foreach ($buys as $buy) {
-            $stock += $buy['qty'];
-            $weightedSum += $buy['qty'] * $buy['price'];
-        }
-        $avgPrice = $stock > 0 ? $weightedSum / $stock : 0;
-        return [
-            'stock' => $stock,
-            'avg_price' => $avgPrice,
-        ];
     }
 }

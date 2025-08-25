@@ -151,7 +151,7 @@ function getPageUrl($pageNumber, $baseUrl, $baseQueryParams) {
                                     <?php endif; ?>
                                 </td>
                                 <td class="text-center fw-bold number-fa">
-                                    <?= Helper::formatRial($tx['total_value_rials'] ?? 0, false) ?>
+                                    <?= Helper::escapeHtml($tx['final_payable_amount_rials_formatted'] ?? '0') ?>
                                 </td>
                                 <td class="text-center">
                                     <span class="badge <?= Helper::escapeHtml($tx['delivery_status_class'] ?? 'bg-secondary') ?>">

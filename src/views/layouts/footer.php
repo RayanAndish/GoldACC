@@ -13,7 +13,6 @@ $baseUrl = $viewData['baseUrl'] ?? '';
 $userIP = $_SERVER['REMOTE_ADDR'] ?? 'Unknown';
 if ($userIP === '::1') $userIP = '127.0.0.1';
 $rayId = (session_status() == PHP_SESSION_ACTIVE && isset($_SESSION['ray_id'])) ? $_SESSION['ray_id'] : null;
-
 ?>
 
     </main>
@@ -38,14 +37,11 @@ $rayId = (session_status() == PHP_SESSION_ACTIVE && isset($_SESSION['ray_id'])) 
         window.allFieldsData = <?= $viewData['global_json_strings']['fields'] ?? '{}' ?>;
         window.allFormulasData = <?= $viewData['global_json_strings']['formulas'] ?? '{}' ?>;
     </script>
-    
-    <!-- FIX: Changed CDN links to local paths -->
     <script src="<?php echo $baseUrl; ?>/js/jquery.min.js"></script>
     <script src="<?php echo $baseUrl; ?>/js/bootstrap.bundle.min.js"></script>
     <script src="<?php echo $baseUrl; ?>/js/autoNumeric.min.js"></script>
     <script src="<?php echo $baseUrl; ?>/js/jalalidatepicker.min.js"></script>
     <script src="<?php echo $baseUrl; ?>/js/toastify.js"></script>
-
     <script>
         // Global Initializations
         document.addEventListener('DOMContentLoaded', function() {
@@ -60,23 +56,25 @@ $rayId = (session_status() == PHP_SESSION_ACTIVE && isset($_SESSION['ray_id'])) 
             // Initialize all Jalali Datepickers on the page
             try {
                 if (typeof jalaliDatepicker !== 'undefined') {
+                    /*
+                    // DISABLED: This global initializer causes conflicts with pages that need specific settings (like the transaction form).
+                    // Each view should initialize its own datepicker.
                     jalaliDatepicker.startWatch({
                         selector: '.jalali-datepicker',
-                        showSeconds: true,
                         showTodayBtn: true,
                         showCloseBtn: true,
-                        time: true,
+                        time: true, // Enable time picker globally
                         format: 'Y/m/d H:i:s',
                         months: ["فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور", "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"],
                         days: ["ی", "د", "س", "چ", "پ", "ج", "ش"],
                         autoClose: true,
                     });
+                    */
                 } else {
                      console.warn('JalaliDatePicker not found.');
                 }
             } catch(e) { console.error("Footer JalaliDatePicker init failed", e); }
         });
     </script>
-
 </body>
 </html>

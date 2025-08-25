@@ -222,7 +222,7 @@ $baseUrl = $viewData['baseUrl'] ?? '/'; // Get base URL
     </div>
 
     <?php // --- JS Includes --- ?>
-    <script src="js/bootstrap.bundle.min.js"></script>
+    <script src="<?php echo $baseUrl; ?>/js/bootstrap.bundle.min.js"></script>
     <?php // Bootstrap Form Validation Script ?>
     <script>
         (() => {

@@ -6,7 +6,7 @@
  */
 
 use App\Utils\Helper; // Use the Helper class
-use App\core\CSRFProtector; // Use the CSRFProtector class
+use App\Core\CSRFProtector; // Use the CSRFProtector class
 
 // --- Extract data from $viewData ---
 $isEditMode = $viewData['is_edit_mode'] ?? false;

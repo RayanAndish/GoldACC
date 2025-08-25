@@ -606,9 +606,75 @@ body.landing-page footer.landing-footer .tech-info {
     color: #fff !important; /* Keep white text for dark backgrounds */
 }
 
+/* --- 10. Transaction Item Row Styles --- */
+/* Ensure the entire item row structure is flexible */
+body#app-body .transaction-item-row {
+  margin-bottom: 1.5rem; /* Space between rows */
+  padding: 1.25rem !important; /* Internal padding for each row card */
+  border: 1px solid #e9ecef;
+  border-radius: 0.375rem;
+  background-color: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .05);
+}
 
-/* Fix potential datepicker display issue (if styles interfere) */
-/* Add specific rules for .datepicker-days, .day etc. if needed */
+/* Make inner rows for dynamic fields take space correctly */
+body#app-body .transaction-item-row .dynamic-fields-container .row {
+  align-items: center; /* Vertically align items in the row */
+  margin-left: 0;
+  margin-right: 0;
+  padding-left: 0;
+  padding-right: 0;
+}
 
-/* --- 10. Print Styles (Keep at the end) --- */
-/* ... existing print styles ... */
+/* General input field styling within item rows */
+body#app-body .transaction-item-row .form-control,
+body#app-body .transaction-item-row .form-select,
+body#app-body .transaction-item-row .form-group label {
+  font-size: 0.85rem; /* Slightly smaller text for compactness */
+  padding: 0.3rem 0.6rem; /* Adjust padding for input/select to make them smaller */
+  height: auto;
+}
+
+/* Ensure dynamic columns behave well (using col-auto is key) */
+body#app-body .transaction-item-row .dynamic-fields-container [class*="col-"] {
+  /* No specific `col-auto` style is usually needed here other than general column rules. */
+  /* Remove min/max-width for individual col-* elements if they are fighting with Bootstrap defaults. */
+  /* For form controls, apply max-width directly to the input inside the col-* div. */
+  padding-left: 0.3rem !important; /* Adjust horizontal padding for columns */
+  padding-right: 0.3rem !important;
+}
+
+/* Target input/select inside col-auto divs to constrain their width, not the column itself */
+body#app-body .transaction-item-row .dynamic-fields-container .col-auto .form-control,
+body#app-body .transaction-item-row .dynamic-fields-container .col-auto .form-select {
+    max-width: 140px; /* Adjust maximum width for input fields as desired, visually. */
+    min-width: 80px; /* Keep a minimum width */
+    width: 100%; /* Important to make them responsive within the col-auto space */
+}
+
+/* Adjustments for smaller form-group labels in dynamic fields */
+body#app-body .transaction-item-row .form-group label {
+    margin-bottom: 0.1rem;
+    white-space: nowrap; /* Prevent labels from wrapping to new line */
+}
+
+/* Reduce horizontal gutter for a tighter fit between columns in dynamic rows */
+body#app-body .transaction-item-row .row.g-2 > [class^="col"],
+body#app-body .transaction-item-row .row.g-2 > .col { /* Ensure both col- and col apply */
+    padding-left: 0.2rem !important;
+    padding-right: 0.2rem !important;
+}
+
+
+/* Make sure input[type=text] or number align correctly with AutoNumeric or direct number entry */
+body#app-body input[type="text"].autonumeric,
+body#app-body input[type="text"].autonumeric-readonly,
+body#app-body input[type="text"].format-number-js {
+    text-align: left; /* Numbers often left-aligned for RTL script. */
+    direction: ltr; /* Ensure LTR reading for numeric input field */
+}
+
+/* Ensure common item description text area fills available width */
+body#app-body .transaction-item-row .col-12 textarea {
+    max-width: 100%;
+}

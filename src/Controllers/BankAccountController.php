@@ -15,7 +15,7 @@ use App\Controllers\AbstractController;
 // Dependencies
 use App\Repositories\BankAccountRepository;
 use App\Utils\Helper; // Utility functions
-use App\core\CSRFProtector; // Added for CSRF protection
+use App\Core\CSRFProtector; // Added for CSRF protection
 
 /**
  * BankAccountController handles HTTP requests related to Bank Accounts.

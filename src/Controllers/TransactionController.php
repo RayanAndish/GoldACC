@@ -1,18 +1,15 @@
 <?php
-
+// src/Controllers/TransactionController.php
 namespace App\Controllers;
 
 use App\Core\ViewRenderer;
-use App\Models\Transaction;
-use App\Models\TransactionItem;
+use App\Models\Product;
 use App\Repositories\AssayOfficeRepository;
 use App\Repositories\ContactRepository;
 use App\Repositories\ProductRepository;
-use App\Repositories\SettingsRepository;
-use App\Repositories\TransactionItemRepository;
 use App\Repositories\TransactionRepository;
+use App\Services\TransactionService;
 use App\Utils\Helper;
-use Exception;
 use Monolog\Logger;
 use PDO;
 use Throwable;
@@ -20,11 +17,11 @@ use Throwable;
 class TransactionController extends AbstractController
 {
     private TransactionRepository $transactionRepository;
-    private TransactionItemRepository $transactionItemRepository;
     private ProductRepository $productRepository;
     private ContactRepository $contactRepository;
     private AssayOfficeRepository $assayOfficeRepository;
-    private SettingsRepository $settingsRepository;
+    private TransactionService $transactionService;
+    private \App\Repositories\TransactionItemRepository $transactionItemRepository; 
 
     public function __construct(
         PDO $db,
@@ -35,16 +32,17 @@ class TransactionController extends AbstractController
     ) {
         parent::__construct($db, $logger, $config, $viewRenderer, $services);
         $this->transactionRepository = $services['transactionRepository'];
-        $this->transactionItemRepository = $services['transactionItemRepository'];
         $this->productRepository = $services['productRepository'];
         $this->contactRepository = $services['contactRepository'];
         $this->assayOfficeRepository = $services['assayOfficeRepository'];
-        $this->settingsRepository = $services['settingsRepository'];
+        $this->transactionItemRepository = $services['transactionItemRepository'];
+        
+        if (!isset($services['transactionService']) || !$services['transactionService'] instanceof TransactionService) {
+            throw new \Exception('TransactionService missing or invalid.');
+        }
+        $this->transactionService = $services['transactionService'];
     }
 
-    /**
-     * Displays the list of transactions.
-     */
     public function index(): void
     {
         $this->requireLogin();
@@ -102,180 +100,239 @@ class TransactionController extends AbstractController
         ]);
     }
 
-    /**
-     * Displays the form for adding a new transaction.
-     * Route: /app/transactions/add (GET)
-     */
+
     public function showAddForm(): void
     {
         $this->showForm(null);
     }
 
-    /**
-     * Displays the form for editing an existing transaction.
-     * Route: /app/transactions/edit/{id} (GET)
-     */
     public function showEditForm(int $id): void
     {
         $this->showForm($id);
     }
 
-    /**
-     * Unified private method to show the Add/Edit form.
-     * This is called by showAddForm and showEditForm.
-     */
-    private function showForm(?int $id = null): void
+    private function showForm(?int $id): void
     {
         $this->requireLogin();
         $isEditMode = $id !== null;
-        $pageTitle = $isEditMode ? "ویرایش معامله #{$id}" : "ثبت معامله جدید";
+        $pageTitle = $isEditMode ? "ویرایش معامله #" . htmlspecialchars($id) : "ثبت معامله جدید";
         $loadingError = null;
-        $transactionData = null;
+        $transactionData = [];
         $transactionItemsData = [];
+        
+        if (!$isEditMode) {
+            $transactionData['transaction_date_persian'] = Helper::formatPersianDate('now');
+        }
 
+        
         if ($isEditMode) {
             try {
-                $transactionData = $this->transactionRepository->findByIdWithItems($id);
-                if (!$transactionData) {
-                    $this->setFlashMessage("معامله مورد نظر یافت نشد.", 'warning');
+                $dbTransaction = $this->transactionRepository->findByIdWithItems($id);
+                if (!$dbTransaction) {
+                    $this->setSessionMessage("معامله مورد نظر یافت نشد.", 'warning');
                     $this->redirect('/app/transactions');
                     return;
                 }
-                $transactionItemsData = $transactionData['items'] ?? [];
+                
+                $transactionData = $dbTransaction;
+                // **اصلاح کلیدی: اطمینان از وجود شناسه در داده‌های اصلی**
+                $transactionData['id'] = $id;
+
+                if (!empty($transactionData['transaction_date'])) {
+                    $transactionData['transaction_date_persian'] = Helper::formatPersianDate($transactionData['transaction_date']);
+                }
+                
+                if (!empty($transactionData['items'])) {
+                    foreach ($transactionData['items'] as $item) {
+                        $transactionItemsData[] = $this->mapItemKeysForForm($item);
+                    }
+                }
+
             } catch (Throwable $e) {
-                $this->logger->error("Error loading transaction for edit form.", ['exception' => $e]);
+                $this->logger->error("Error loading transaction for edit form.", ['id' => $id, 'exception' => $e]);
                 $loadingError = "خطا در بارگذاری اطلاعات معامله.";
             }
         }
+       
         
         list($fields, $formulas) = $this->loadFieldsAndFormulas();
-
-        $productsData = $this->getProductsWithDetails();
+        
+        $productsFromRepo = $this->productRepository->getAllActiveWithCategory();
+        
+        $productsForJs = array_map(function(\App\Models\Product $product) {
+            return [
+                'id' => $product->id,
+                'name' => $product->name,
+                'category_id' => $product->category_id,
+                'unit_of_measure' => $product->unit_of_measure,
+                'general_tax_base_type' => $product->general_tax_base_type,
+                'tax_rate' => $product->tax_rate,
+                'vat_base_type' => $product->vat_base_type,
+                'vat_rate' => $product->vat_rate,
+                'category' => $product->category ? [
+                    'id' => $product->category->id,
+                    'name' => $product->category->name,
+                    'code' => $product->category->code ?? null,
+                    'base_category' => $product->category->base_category,
+                    'unit_of_measure' => $product->category->unit_of_measure ?? null,
+                ] : null
+            ];
+        }, $productsFromRepo);
 
         $this->render('transactions/form', [
             'page_title' => $pageTitle,
-            'form_action' => $this->config['app']['base_url'] . '/app/transactions/save' . ($isEditMode ? '/' . $id : ''),
             'is_edit_mode' => $isEditMode,
             'transactionData' => $transactionData,
             'transactionItemsData' => $transactionItemsData,
             'contactsData' => $this->contactRepository->getAll(),
             'assayOfficesData' => $this->assayOfficeRepository->getAll(),
-            'productsData' => $productsData,
+            'productsData' => $productsForJs,
             'fieldsData' => $fields,
             'formulasData' => $formulas,
-            'default_settings' => [
-                'tax_rate' => $this->settingsRepository->get('tax_rate', 0),
-                'vat_rate' => $this->settingsRepository->get('vat_rate', 0),
-            ],
             'loading_error' => $loadingError,
-            'csrf_token' => Helper::generateCsrfToken(),
             'baseUrl' => $this->config['app']['base_url'],
-            'config' => $this->config,
+            'config' => $this->config, // برای دسترسی به تنظیمات در view
         ]);
     }
 
-    /**
-     * Unified method to save a transaction (Add or Edit).
-     */
+
     public function save(?int $id = null): void
     {
         $this->requireLogin();
-        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        
+        $requestData = [];
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            $jsonInput = file_get_contents('php://input');
+            $requestData = json_decode($jsonInput, true);
+
+            if (json_last_error() !== JSON_ERROR_NONE) {
+                $this->jsonResponse(['success' => false, 'message' => 'درخواست نامعتبر (JSON).'], 400);
+                return;
+            }
+        } else {
             $this->redirect('/app/transactions');
             return;
         }
 
-        if (!Helper::verifyCsrfToken($_POST['csrf_token'] ?? '')) {
-            $this->sendJsonResponse(false, "خطای امنیتی (CSRF). لطفاً صفحه را رفرش کنید.");
+        if (!Helper::verifyCsrfToken($requestData['csrf_token'] ?? '')) {
+            $this->jsonResponse(['success' => false, 'message' => "خطای امنیتی (CSRF)."], 403);
             return;
         }
-
-        $isEditMode = $id !== null;
-        $postData = $_POST;
-        $this->logger->debug("Raw POST data received for save.", ['post_data' => $postData, 'is_edit' => $isEditMode]);
-
-        $errors = $this->validateTransactionData($postData);
-        if (!empty($errors)) {
-            $this->sendJsonResponse(false, "خطا در اعتبارسنجی فرم.", ['errors' => $errors]);
-            return;
-        }
-
-        $this->db->beginTransaction();
+        
         try {
-            $transaction = new Transaction();
-            $transaction->id = $isEditMode ? $id : null;
-            $transaction->transaction_type = $postData['transaction_type'];
-            $transaction->transaction_date = Helper::parseJalaliDatetimeToSql($postData['transaction_date']);
-            $transaction->counterparty_contact_id = (int)$postData['counterparty_contact_id'];
-            $transaction->mazaneh_price = Helper::sanitizeFormattedNumber($postData['mazaneh_price'] ?? '0');
-            $transaction->delivery_status = $postData['delivery_status'];
-            $transaction->notes = trim($postData['notes'] ?? '');
-
-            // IMPROVEMENT: Fetch all products at once using the new efficient method.
-            $productIds = array_unique(array_filter(array_column($postData['items'] ?? [], 'product_id')));
-            $productsById = !empty($productIds) ? $this->productRepository->findByIds($productIds) : [];
+            $savedId = $this->transactionService->saveTransaction($requestData, $id);
             
-            $itemsToSave = [];
-            foreach ($postData['items'] as $itemData) {
-                if (empty($itemData['product_id'])) continue;
-                
-                $product = $productsById[$itemData['product_id']] ?? null;
-                if (!$product) throw new Exception("محصول با شناسه {$itemData['product_id']} یافت نشد.");
-
-                $item = new TransactionItem();
-                $item->id = !empty($itemData['id']) ? (int)$itemData['id'] : null;
-                $item->product_id = (int)$itemData['product_id'];
-
-                // FIX: Map form data robustly, converting empty strings to null.
-                $this->mapItemData($item, $itemData, $product->category->base_category);
-                
-                // Recalculate all financial values on the server for security.
-                $this->recalculateItemFormulas($item, $transaction, $product);
-                
-                $itemsToSave[] = $item;
-            }
-
-            if (empty($itemsToSave)) {
-                throw new Exception("هیچ قلم کالای معتبری برای ذخیره وجود ندارد.");
-            }
-
-            $this->recalculateTransactionSummary($transaction, $itemsToSave);
-            
-            $savedTransactionId = $this->transactionRepository->save($transaction);
-            
-            if ($isEditMode) {
-                $itemIdsToKeep = array_filter(array_column($itemsToSave, 'id'));
-                $this->transactionItemRepository->deleteRemovedItems($savedTransactionId, $itemIdsToKeep);
-            }
-
-            foreach ($itemsToSave as $item) {
-                $item->transaction_id = $savedTransactionId;
-                $this->transactionItemRepository->save($item);
-            }
-
-            $this->db->commit();
-            $this->logger->info("Transaction saved successfully.", ['id' => $savedTransactionId, 'is_edit' => $isEditMode]);
-            
+            $isEditMode = $id !== null;
             $message = $isEditMode ? "معامله با موفقیت به‌روزرسانی شد." : "معامله با موفقیت ثبت شد.";
             $this->setFlashMessage($message, 'success');
-            $this->sendJsonResponse(true, $message, ['redirect_url' => $this->config['app']['base_url'] . '/app/transactions']);
+            
+            $responseData = [
+                'success' => true,
+                'message' => $message,
+                'redirect_url' => $this->config['app']['base_url'] . '/app/transactions'
+            ];
+            $this->jsonResponse($responseData, 200);
 
         } catch (Throwable $e) {
-            $this->db->rollBack();
-            $this->logger->error("Critical error saving transaction.", ['exception' => $e, 'post_data' => $postData]);
-            $this->sendJsonResponse(false, "خطای سیستمی در ذخیره معامله: " . $e->getMessage());
+            $this->logger->error("Transaction save controller error.", ['exception' => $e]);
+            $errorData = [ 'success' => false, 'message' => "خطا در ذخیره معامله: " . $e->getMessage() ];
+            if ($this->config['app']['debug']) {
+                $errorData['message'] .= " (Detail: " . $e->getMessage() . " in " . $e->getFile() . " on line " . $e->getLine() . ")";
+            }
+            $this->jsonResponse($errorData, 500);
         }
     }
-
+    
     /**
-     * Deletes a transaction.
+     * Maps database column names (and computed values from backend processing) to the expected form field names for an item when loading for edit.
+     * This ensures the frontend form displays existing data correctly matching the JS-rendered dynamic field names.
+     * REVISED for unified 'bullion' group and better defaults.
      */
+
+     /**
+     * (نهایی و کامل) کلیدهای دیتابیس را به نام فیلدهای فرم جاوا اسکریپت ترجمه می‌کند.
+     */
+   /**
+     * (نسخه نهایی بر اساس لیست دقیق شما) کلیدهای دیتابیس را به نام فیلدهای فرم ترجمه می‌کند.
+     */
+ /**
+     * (نسخه نهایی) کلیدهای دیتابیس را به نام فیلدهای فرم ترجمه می‌کند.
+     */
+ 
+    /**
+     * (نسخه نهایی) کلیدهای دیتابیس را به نام فیلدهای فرم ترجمه می‌کند.
+     */
+
+  private function mapItemKeysForForm(array $itemData): array
+    {
+        $mappedData = $itemData;
+        $baseCategory = strtolower($itemData['base_category'] ?? '');
+        
+        $mappedData['id'] = $itemData['item_id'];
+        $mappedData['item_product_id'] = $itemData['product_id'];
+        $mappedData['item_description'] = $itemData['item_description'];
+        $mappedData["item_weight_scale_{$baseCategory}"] = $itemData['weight_grams'];
+        $mappedData["item_carat_{$baseCategory}"] = $itemData['carat'];
+        $mappedData["item_unit_price_{$baseCategory}"] = $itemData['unit_price_rials'];
+        $mappedData["item_profit_percent_{$baseCategory}"] = $itemData['profit_percent'];
+        $mappedData["item_fee_percent_{$baseCategory}"] = $itemData['fee_percent'];
+
+        switch ($baseCategory) {
+            case 'melted':
+                $mappedData['item_tag_number_melted'] = $itemData['tag_number'];
+                $mappedData['item_assay_office_melted'] = $itemData['assay_office_id'];
+                $mappedData['item_tag_type_melted'] = $itemData['tag_type'];
+                break;
+            case 'manufactured':
+                $mappedData['item_quantity_manufactured'] = $itemData['quantity'];
+                $mappedData['item_type_manufactured'] = $itemData['manufactured_item_type'];
+                $mappedData['item_has_attachments_manufactured'] = ($itemData['has_attachments'] == 1) ? 'yes' : 'no';
+                $mappedData['item_attachment_type_manufactured'] = $itemData['attachment_type'];
+                $mappedData['item_attachment_weight_manufactured'] = $itemData['stone_weight_grams'];
+                $mappedData['item_workshop_manufactured'] = $itemData['workshop_name'];
+                if (isset($itemData['ajrat_percent']) && (float)$itemData['ajrat_percent'] > 0) {
+                    $mappedData['item_manufacturing_fee_type_manufactured'] = 'percent';
+                    $mappedData['item_manufacturing_fee_rate_manufactured'] = $itemData['ajrat_percent'];
+                } elseif (isset($itemData['ajrat_rials']) && (float)$itemData['ajrat_rials'] > 0) {
+                    $mappedData['item_manufacturing_fee_type_manufactured'] = 'amount';
+                    $mappedData['item_manufacturing_fee_amount_manufactured'] = $itemData['ajrat_rials'];
+                }
+                break;
+            case 'coin':
+                $mappedData['item_quantity_coin'] = $itemData['quantity'];
+                $mappedData['item_coin_year_coin'] = $itemData['coin_year'];
+                $mappedData['item_type_coin'] = ($itemData['is_bank_coin'] == 1) ? 'bank' : 'misc';
+                $mappedData['item_vacuum_name_coin'] = $itemData['seal_name'];
+                break;
+            case 'bullion':
+                $mappedData['item_bullion_number_bullion'] = $itemData['tag_number'];
+                $mappedData['item_manufacturer_bullion'] = $itemData['workshop_name'];
+                break;
+            case 'jewelry':
+                $mappedData['item_quantity_jewelry'] = $itemData['quantity'];
+                $mappedData['item_weight_carat_jewelry'] = $itemData['weight_grams'];
+                $mappedData['item_unit_price_jewelry'] = $itemData['unit_price_rials'];
+                $mappedData['item_type_jewelry'] = $itemData['jewelry_type'];
+                $mappedData['item_color_jewelry'] = $itemData['jewelry_color'];
+                $mappedData['item_quality_grade_jewelry'] = $itemData['jewelry_quality'];
+                break;
+        }
+        return $mappedData;
+    }
+
+
     public function delete(int $id): void
     {
         $this->requireLogin();
         
         try {
             $this->db->beginTransaction();
+            if (isset($this->services['contactWeightLedgerRepository'])) {
+                $this->services['contactWeightLedgerRepository']->deleteByTransactionId($id);
+            } else {
+                $this->logger->warning("contactWeightLedgerRepository service not found for delete operation.");
+            }
+            
             $this->transactionItemRepository->deleteByTransactionId($id);
             $this->transactionRepository->delete($id);
             $this->db->commit();
@@ -285,148 +342,77 @@ class TransactionController extends AbstractController
             $this->logger->error("Error deleting transaction.", ['id' => $id, 'exception' => $e]);
             $this->setFlashMessage("خطا در حذف معامله.", 'danger');
         }
-        
         $this->redirect('/app/transactions');
-    }
-
-    // ===================================================================
-    // PRIVATE HELPER METHODS
-    // ===================================================================
-
-    private function getProductsWithDetails(): array
-    {
-        $sql = "SELECT p.*, pc.name as category_name, pc.base_category 
-                FROM products p 
-                JOIN product_categories pc ON p.category_id = pc.id 
-                WHERE p.is_active = 1 
-                ORDER BY pc.name, p.name";
-        $stmt = $this->db->query($sql);
-        $productsRaw = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-        $productsData = [];
-        foreach ($productsRaw as $p) {
-            $productsData[] = [
-                'id' => (int)$p['id'],
-                'name' => $p['name'],
-                'tax_enabled' => isset($p['tax_enabled']) ? (bool)$p['tax_enabled'] : false,
-                'tax_rate' => isset($p['tax_rate']) ? (float)$p['tax_rate'] : 0.0,
-                'vat_enabled' => isset($p['vat_enabled']) ? (bool)$p['vat_enabled'] : false,
-                'vat_rate' => isset($p['vat_rate']) ? (float)$p['vat_rate'] : 0.0,
-                'category' => [
-                    'name' => $p['category_name'],
-                    'base_category' => $p['base_category']
-                ]
-            ];
-        }
-        return $productsData;
-    }
-
-    private function mapItemData(TransactionItem &$item, array $itemData, string $baseCategory): void
-    {
-        $group = strtolower($baseCategory);
-
-        // Helper function to sanitize and nullify if empty or not numeric.
-        $sanitize = function($value) {
-            if ($value === null || $value === '') {
-                return null; // Convert empty string to NULL for DB
-            }
-            // Sanitize to get a clean number string
-            $cleaned = Helper::sanitizeFormattedNumber($value);
-            // Return as float if numeric, otherwise null
-            return is_numeric($cleaned) ? (float)$cleaned : null;
-        };
-        
-        // Helper for string values that can be empty
-        $stringOrNull = fn($value) => ($value === null || $value === '') ? null : trim($value);
-
-        $item->quantity = $sanitize($itemData["item_quantity_{$group}"] ?? null);
-        $item->weight_grams = $sanitize($itemData["item_weight_scale_{$group}"] ?? null);
-        $item->carat = $sanitize($itemData["item_carat_{$group}"] ?? null);
-        $item->unit_price_rials = $sanitize($itemData["item_unit_price_{$group}"] ?? null);
-        $item->tag_number = $stringOrNull($itemData["item_tag_number_{$group}"] ?? null);
-        $item->assay_office_id = $sanitize($itemData["item_assay_office_melted"] ?? null);
-        $item->coin_year = $sanitize($itemData["item_coin_year_{$group}"] ?? null);
-        $item->seal_name = $stringOrNull($itemData["item_vacuum_name_{$group}"] ?? null);
-        $item->is_bank_coin = isset($itemData['item_type_coin']) && $itemData['item_type_coin'] === 'bank';
-        $item->ajrat_rials = $sanitize($itemData["item_manufacturing_fee_rate_{$group}"] ?? null); // This is a rate from form
-        $item->workshop_name = $stringOrNull($itemData["item_workshop_{$group}"] ?? null);
-        $item->stone_weight_grams = $sanitize($itemData["item_attachment_weight_{$group}"] ?? null);
-        $item->description = trim($itemData['item_description'] ?? '');
-        $item->profit_percent = $sanitize($itemData["item_profit_percent_{$group}"] ?? '0');
-        $item->fee_percent = $sanitize($itemData["item_fee_percent_{$group}"] ?? '0');
-    }
-
-    private function recalculateItemFormulas(TransactionItem &$item, Transaction $transaction, object $product): void
-    {
-        $group = strtolower($product->category->base_category);
-        $item->weight_750 = ($item->weight_grams && $item->carat) ? round(($item->weight_grams * $item->carat) / 750, 3) : 0;
-
-        // قیمت کل فقط عدد صحیح (بدون اعشار)
-        if ($group === 'coin' || $group === 'jewelry') {
-            $item->total_value_rials = round(($item->quantity ?: 1) * ($item->unit_price_rials ?: 0));
-        } else {
-            $unitPrice750 = $transaction->mazaneh_price > 0 ? $transaction->mazaneh_price / 4.3318 : 0;
-            $item->total_value_rials = round($item->weight_750 * $unitPrice750);
-        }
-
-        $baseForProfit = $item->total_value_rials;
-        $item->profit_amount = round($baseForProfit * (($item->profit_percent ?? 0) / 100));
-        $item->fee_amount = round($baseForProfit * (($item->fee_percent ?? 0) / 100));
-
-        // مقداردهی پیش‌فرض برای مالیات‌ها
-        $item->general_tax = 0;
-        $item->vat = 0;
-
-        if (!empty($product->tax_enabled)) {
-            $item->general_tax = round($baseForProfit * (($product->tax_rate ?? 0) / 100));
-        }
-
-        if (!empty($product->vat_enabled)) {
-            $baseForVat = ($item->profit_amount ?? 0) + ($item->fee_amount ?? 0);
-            if ($group === 'manufactured') {
-                $baseForVat += ($item->ajrat_rials ?? 0);
-            }
-            $item->vat = round($baseForVat * (($product->vat_rate ?? 0) / 100));
-        }
-    }
-
-    private function recalculateTransactionSummary(Transaction &$transaction, array $items): void
-    {
-        $transaction->total_items_value_rials = array_sum(array_column($items, 'total_value_rials'));
-        $transaction->total_profit_wage_commission_rials = array_sum(array_column($items, 'profit_amount')) + array_sum(array_column($items, 'fee_amount')) + array_sum(array_column($items, 'ajrat_rials'));
-        $transaction->total_general_tax_rials = array_sum(array_column($items, 'general_tax'));
-        $transaction->total_vat_rials = array_sum(array_column($items, 'vat'));
-        $transaction->total_before_vat_rials = $transaction->total_items_value_rials + $transaction->total_profit_wage_commission_rials + $transaction->total_general_tax_rials;
-        $transaction->final_payable_amount_rials = $transaction->total_before_vat_rials + $transaction->total_vat_rials;
-    }
-
-    private function validateTransactionData(array $postData): array
-    {
-        $errors = [];
-        if (empty($postData['transaction_type'])) $errors[] = "نوع معامله الزامی است.";
-        if (empty($postData['counterparty_contact_id'])) $errors[] = "انتخاب طرف حساب الزامی است.";
-        if (empty($postData['transaction_date'])) $errors[] = "تاریخ معامله الزامی است.";
-        if (!isset($postData['items']) || !is_array($postData['items']) || empty($postData['items'])) {
-            $errors[] = "حداقل یک قلم کالا باید در معامله وجود داشته باشد.";
-        }
-        return $errors;
-    }
-
-    private function sendJsonResponse(bool $success, string $message, array $data = []): void
-    {
-        header('Content-Type: application/json; charset=utf-8');
-        echo json_encode(['success' => $success, 'message' => $message] + $data, JSON_UNESCAPED_UNICODE);
-        exit;
     }
 
     private function loadFieldsAndFormulas(): array
     {
         $fieldsPath = $this->config['paths']['config'] . '/fields.json';
         $formulasPath = $this->config['paths']['config'] . '/formulas.json';
+        
+        if (!file_exists($fieldsPath) || !is_readable($fieldsPath)) {
+            $this->logger->error("fields.json not found or not readable at: " . $fieldsPath);
+            throw new Exception("File not found or not readable: fields.json");
+        }
+        if (!file_exists($formulasPath) || !is_readable($formulasPath)) {
+            $this->logger->error("formulas.json not found or not readable at: " . $formulasPath);
+            throw new Exception("File not found or not readable: formulas.json");
+        }
+
         $fields = json_decode(file_get_contents($fieldsPath), true)['fields'] ?? [];
         $formulas = json_decode(file_get_contents($formulasPath), true)['formulas'] ?? [];
+
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            $errorMessage = "JSON Decode Error in config files: " . json_last_error_msg();
+            $this->logger->error($errorMessage, ['fields_json_error' => (json_last_error() === JSON_ERROR_NONE ? null : json_last_error_msg()), 'formulas_json_error' => (json_last_error() === JSON_ERROR_NONE ? null : json_last_error_msg())]);
+            throw new Exception($errorMessage);
+        }
+
         return [$fields, $formulas];
     }
+
+    /**
+     * Handles the completion of a transaction's delivery status (receipt or delivery).
+     * Route: /app/transactions/complete-delivery/{id}/{action} (POST)
+     * @param int $id The transaction ID.
+     * @param string $action 'receipt' for pending_receipt, 'delivery' for pending_delivery.
+     */
+    public function completeDeliveryAction(int $id, string $action): void
+    {
+        $this->requireLogin();
+
+        // Validate action type
+        if (!in_array($action, ['receipt', 'delivery'])) {
+            $this->setFlashMessage('عمل نامعتبر.', 'danger');
+            $this->redirect('/app/transactions');
+            return;
+        }
+
+        // Basic CSRF protection. Assuming form submits csrf_token as POST parameter.
+        // As it's an API-like route without a form in the original code, ensure you validate request or csrf helper does.
+        $csrfToken = $_POST['csrf_token'] ?? '';
+        if (!Helper::verifyCsrfToken($csrfToken)) {
+            $this->setFlashMessage("خطای امنیتی (CSRF).", 'danger');
+            $this->redirect('/app/transactions');
+            return;
+        }
+
+        try {
+            $result = $this->transactionService->completeDelivery($id, $action);
+
+            if ($result) {
+                $this->setFlashMessage("وضعیت تحویل معامله با موفقیت به‌روزرسانی شد و موجودی به روز شد.", 'success');
+            } else {
+                $this->setFlashMessage("عملیات ناموفق بود. معامله در وضعیت صحیح برای این عمل نیست یا مشکلی پیش آمد.", 'warning');
+            }
+        } catch (Throwable $e) {
+            $this->logger->error("Error completing delivery action.", ['id' => $id, 'action' => $action, 'exception' => $e]);
+            $this->setFlashMessage("خطا در به‌روزرسانی وضعیت تحویل: " . $e->getMessage(), 'danger');
+        }
+
+        $this->redirect('/app/transactions');
+    }
+
 
     private function formatTransactionForListView(array &$tx): void
     {

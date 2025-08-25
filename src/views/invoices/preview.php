@@ -1,42 +1,28 @@
 <?php
-/**
- * Template: src/views/invoices/preview.php
- * Displays a printable invoice preview.
- * Receives data via $viewData array from InvoiceController::preview.
- * Relies on CSS classes defined in style.css (@media print) for formatting.
- */
+use App\Utils\Helper;
+use Morilog\Jalali\Jalalian;
 
-use App\Utils\Helper; // Use the Helper class
-use Morilog\Jalali\Jalalian; // Add Jalalian namespace
-
-// --- Extract data from $viewData ---
 $invoice = $viewData['invoice'] ?? [];
-$pageTitle = $invoice['page_title'] ?? 'پیش‌نمایش فاکتور';
-$invoiceContact = $invoice['contact'] ?? null; // Customer/Supplier info
-$invoiceItems = $invoice['items'] ?? []; // Array of transaction items for the invoice
-$invoiceSummary = $invoice['summary'] ?? []; // Totals, tax, words
-$invoiceTypeLabel = $invoice['type_label'] ?? 'فاکتور معاملات';
+$pageTitle = 'فاکتور';
+$invoiceContact = $invoice['contact'] ?? null;
+$invoiceItems = $invoice['items'] ?? [];
+$invoiceSummary = $invoice['summary'] ?? [];
 $errorMessage = $invoice['error_msg'] ?? null;
 $baseUrl = $viewData['baseUrl'] ?? '';
 $appName = $viewData['appName'] ?? 'حسابداری رایان طلا';
-$currentDateFarsi = $viewData['current_date_farsi'] ?? Jalalian::fromFormat('Y-m-d', date('Y-m-d'))->format('Y/m/d');
+$currentDateFarsi = $viewData['current_date_farsi'] ?? Jalalian::now()->format('Y/m/d');
 
-// Seller info (should come from settings/config via controller)
-$sellerInfo = $viewData['seller_info'] ?? [
-    'name' => Helper::escapeHtml($appName),
-    'address' => 'آدرس شما...',
-    'phone' => 'تلفن شما...',
-    'logo_path' => 'images/logo.png', // Relative to public path
-    'registration_code' => '',
-    'postal_code' => ''
-];
+// اطلاعات خریدار و فروشنده از کنترلر ارسال شده
+$buyerInfo = $invoice['buyer_info'] ?? [];
+$sellerInfo = $invoice['seller_info'] ?? [];
+$invoiceTypeLabel = $invoice['type_label'] ?? 'فاکتور';
 
-// Ensure summary keys exist
+// استخراج مقادیر از خلاصه مالی
 $subTotal = (float)($invoiceSummary['sub_total'] ?? 0.0);
-$taxRatePercent = (float)($invoiceSummary['tax_rate_percent'] ?? 0.0);
-$taxAmount = (float)($invoiceSummary['tax_amount'] ?? 0.0);
-$grandTotal = (float)($invoiceSummary['grand_total'] ?? $subTotal);
-$grandTotalWords = $invoiceSummary['grand_total_words'] ?? Helper::convertNumberToWords($grandTotal) . ' ریال';
+$totalGeneralTax = (float)($invoiceSummary['total_general_tax'] ?? 0.0);
+$totalVat = (float)($invoiceSummary['total_vat'] ?? 0.0);
+$grandTotal = (float)($invoiceSummary['grand_total'] ?? 0.0);
+$grandTotalWords = $invoiceSummary['grand_total_words'] ?? '';
 $itemCount = (int)($invoiceSummary['item_count'] ?? count($invoiceItems));
 
 ?>
@@ -44,161 +30,210 @@ $itemCount = (int)($invoiceSummary['item_count'] ?? count($invoiceItems));
 <html lang="fa" dir="rtl">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><?php echo Helper::escapeHtml($pageTitle . ' - ' . ($invoiceContact['name'] ?? '')); ?></title>
-    <base href="<?php echo Helper::escapeHtml(rtrim($baseUrl, '/') . '/'); ?>/">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.rtl.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css"> <?php // Include main style for consistency? ?>
+    <title><?php echo Helper::escapeHtml($invoiceTypeLabel . ' - ' . ($invoiceContact['name'] ?? '')); ?></title>
+    <link rel="stylesheet" href="<?php echo $baseUrl; ?>/css/bootstrap.rtl.min.css">
+    <style>
+        body { background-color: #eee; font-family: 'Vazirmatn', sans-serif !important; }
+        .invoice-container { max-width: 100%; margin: 2rem auto; background: #fff; border: 1px solid #ddd; }
+        .table > :not(caption) > * > * { padding: 0.6rem; vertical-align: middle; }
+        .table th { font-weight: 600; }
+        .table tfoot td { border-width: 0; }
+        .signature-area { margin-top: 5rem; }
+        
+        /* --- استایل‌های نهایی و کامل برای چاپ --- */
+        @media print {
+            /* --- تنظیمات کلی صفحه --- */
+            body {
+                background-color: #fff !important;
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+            }
+            .no-print { display: none !important; }
+            .invoice-container {
+                width: 95%;
+                max-width: 100%;
+                margin: 0 !important;
+                padding: 0 !important;
+                border: none !important;
+                box-shadow: none !important;
+            }
+
+            /* --- کاهش فاصله‌های اضافی برای جا شدن در یک صفحه --- */
+            .row, p, h2, h4, h6, section {
+                margin-bottom: 0.5rem !important; /* کاهش فاصله پایین تمام بخش‌ها */
+            }
+            header.row {
+                margin-bottom: 1rem !important;
+            }
+            
+            /* --- تنظیمات جدول --- */
+            .table {
+                margin-bottom: 0.5rem !important;
+            }
+            .table > :not(caption) > * > * {
+                padding: 0.3rem 0.4rem; /* کاهش پدینگ داخلی سلول‌ها */
+            }
+            .table-responsive {
+                overflow-x: hidden !important; /* حذف اسکرول افقی در چاپ */
+            }
+
+            /* --- تنظیمات اندازه فونت برای خوانایی و بهینه‌سازی فضا --- */
+            body, .table {
+                font-size: 9pt !important;
+            }
+            h2 { font-size: 13pt !important; }
+            h4, h6 { font-size: 11pt !important; }
+            
+            /* (اصلاح کلیدی) تنظیم اندازه فونت خلاصه مالی */
+            .summary-table td {
+                font-size: 10pt !important;
+            }
+            /* (اصلاح کلیدی) کوچک کردن "مبلغ نهایی قابل پرداخت" در چاپ */
+            .summary-table .grand-total-row td {
+                font-size: 12pt !important;
+            }
+
+            /* --- تنظیمات پایانی --- */
+            .signature-area { margin-top: 1rem !important; }
+            footer { margin-top: 1.5rem !important; }
+        }
+    </style>
 </head>
-<body id="app-body" class="bg-light invoice-preview"> <?php // Use a light background for preview contrast ?>
-
-    <?php // --- Main Invoice Container --- ?>
-    <div class="container my-4"> <?php // Standard container for centering/padding ?>
-        <div class="invoice-container bg-white p-4 p-md-5 shadow-sm border"> <?php // Apply class for print styles ?>
-
-             <?php // --- Error Handling --- ?>
-            <?php if ($errorMessage || !$invoiceContact): ?>
-                 <div class="alert alert-danger no-print">
-                     <?php echo Helper::escapeHtml($errorMessage ?: 'اطلاعات لازم برای نمایش فاکتور یافت نشد.'); ?>
+<body>
+    <div class="invoice-container p-2 p-md-2">
+        <?php if ($errorMessage): ?>
+            <!-- ... -->
+        <?php else: ?>
+            <div class="text-center mb-4 no-print">
+                 <button class="btn btn-success" onclick="window.print();"><i class="fas fa-print me-1"></i> چاپ</button>
+                 <a href="javascript:history.back()" class="btn btn-secondary ms-2">بازگشت</a>
+             </div>
+             
+             <div class="text-center">
+                <h2><?php echo Helper::escapeHtml($invoiceTypeLabel); ?></h2>
+             </div>
+             
+             <header class="row mb-1 mt-1">
+                 <div class="col-6">
+                     <p><strong>شماره فاکتور:</strong> <?php echo Helper::escapeHtml('RGI-' . date('Ymd') . $invoiceContact['id']); ?></p>
+                     <p><strong>تاریخ صدور:</strong> <?php echo $currentDateFarsi; ?></p>
                  </div>
-                 <div class="text-center no-print mt-3">
-                     <button onclick="window.close();" class="btn btn-secondary btn-sm">بستن</button>
-                     <a href="javascript:history.back()" class="btn btn-outline-secondary btn-sm ms-2">بازگشت</a>
+                 <div class="col-6 text-end">
+                     <h4><?php echo Helper::escapeHtml($appName); ?></h4>
+                     <p class="small text-muted"><?php // اطلاعات آدرس و تلفن مالک سامانه ?></p>
                  </div>
-            <?php else: // ---- START INVOICE CONTENT ---- ?>
+             </header>
 
-                 <?php // --- Action Buttons (No Print) --- ?>
-                 <div class="text-center mb-4 no-print">
-                     <button class="btn btn-success btn-sm" onclick="window.print();"><i class="fas fa-print me-1"></i> چاپ</button>
-                     <button class="btn btn-secondary btn-sm ms-2" onclick="window.close();"><i class="fas fa-times me-1"></i> بستن</button>
-                     <a href="javascript:history.back()" class="btn btn-outline-secondary btn-sm ms-2"><i class="fas fa-arrow-left me-1"></i>بازگشت</a>
+                <!-- (اصلاح نهایی) بخش اطلاعات خریدار و فروشنده -->
+                <section class="row mb-1">
+                 <div class="col-6">
+                     <h6>مشخصات فروشنده:</h6>
+                     <p><strong>نام:</strong> <?php echo Helper::escapeHtml($sellerInfo['name'] ?? ($sellerInfo['customer_name'] ?? '')); ?></p>
+                     <p class="small text-muted">
+                        <?php 
+                        // نمایش جزئیات طرف حساب یا آدرس مالک سامانه
+                        $sellerDetails = $sellerInfo['details'] ?? ($sellerInfo['seller_address'] ?? '');
+                        echo nl2br(Helper::escapeHtml($sellerDetails));
+                        ?>
+                     </p>
                  </div>
-
-                <?php // --- Invoice Header --- ?>
-                <div class="row mb-4 align-items-start invoice-header">
-                    <div class="col-7 invoice-details">
-                        <h2 class="mb-2 fw-bold"><?php echo Helper::escapeHtml($invoiceTypeLabel); ?></h2>
-                        <p><strong>شماره فاکتور:</strong> <span class="number-fa"><?php echo Helper::escapeHtml('INV-' . date('ymd') . $invoiceContact['id']); ?></span></p>
-                        <p><strong>تاریخ صدور:</strong> <span class="number-fa"><?php echo Helper::escapeHtml($currentDateFarsi); ?></span></p>
-                    </div>
-                    <div class="col-5 text-start invoice-details"> <?php // Align left in RTL for logo/seller info ?>
-                         <?php if (!empty($sellerInfo['logo_path']) && file_exists($_SERVER['DOCUMENT_ROOT'] . '/' . ltrim($sellerInfo['logo_path'], '/'))): ?>
-                             <img src="<?php echo Helper::escapeHtml($sellerInfo['logo_path']); ?>" alt="لوگو" style="max-height: 60px; margin-bottom: 10px;">
-                         <?php else: ?>
-                            <h6 class="mb-1 fw-bold"><?php echo $sellerInfo['name']; ?></h6>
-                         <?php endif; ?>
-                        <p class="small mb-1"><?php echo nl2br(Helper::escapeHtml($sellerInfo['address'])); ?></p>
-                        <p class="small mb-0">تلفن: <span class="number-fa"><?php echo Helper::escapeHtml($sellerInfo['phone']); ?></span></p>
-                        <?php if (!empty($sellerInfo['registration_code'])): ?><p class="small mb-0"><?php echo Helper::escapeHtml($sellerInfo['registration_code']); ?></p><?php endif; ?>
-                        <?php if (!empty($sellerInfo['postal_code'])): ?><p class="small mb-0">کدپستی: <span class="number-fa"><?php echo Helper::escapeHtml($sellerInfo['postal_code']); ?></span></p><?php endif; ?>
-                    </div>
-                </div> <?php // End Header ?>
-
-                <?php // --- Contact Info --- ?>
-                <div class="invoice-details border rounded p-3 mb-4 bg-light">
-                    <h6 class="mb-2">مشخصات <?php echo (stripos($invoiceTypeLabel,'خرید') !== false) ? 'فروشنده' : 'خریدار'; ?>:</h6>
-                    <p class="mb-1"><strong>نام:</strong> <?php echo $invoiceContact['name']; // Already escaped ?></p>
-                    <?php if (!empty($invoiceContact['details'])): ?>
-                        <div class="row gx-3 small">
-                             <?php // Try to parse details (basic line splitting) ?>
-                             <?php $lines = preg_split('/\r\n|\r|\n/', trim($invoiceContact['details'])); $lineCount = count($lines); ?>
-                             <?php foreach($lines as $i => $line): if(empty(trim($line))) continue; $parts=explode(':', $line, 2); ?>
-                                 <div class="<?php echo ($lineCount > 1 && $i < 2) ? 'col-sm-6' : 'col-sm-12'; ?> mb-1"> <?php // Two columns for first 2 lines if more than 1 line ?>
-                                      <?php if(isset($parts[1])): // Key: Value format ?>
-                                         <strong><?php echo Helper::escapeHtml(trim($parts[0]));?>:</strong> <span class="number-fa"><?php echo Helper::escapeHtml(trim($parts[1]));?></span>
-                                      <?php else: // Simple line ?>
-                                          <?php echo Helper::escapeHtml(trim($parts[0])); ?>
-                                      <?php endif; ?>
-                                 </div>
-                             <?php endforeach; ?>
-                        </div>
-                    <?php endif; ?>
-                </div> <?php // End Contact Info ?>
+                 <div class="col-6">
+                     <h6>مشخصات خریدار:</h6>
+                     <p><strong>نام:</strong> <?php echo Helper::escapeHtml($buyerInfo['name'] ?? ($buyerInfo['customer_name'] ?? '')); ?></p>
+                      <p class="small text-muted">
+                        <?php
+                        $buyerDetails = $buyerInfo['details'] ?? ($buyerInfo['seller_address'] ?? '');
+                        echo nl2br(Helper::escapeHtml($buyerDetails));
+                        ?>
+                     </p>
+                 </div>
+                </section>
 
                  <?php // --- Invoice Items Table --- ?>
                  <?php if (!empty($invoiceItems)): ?>
-                    <div class="table-responsive">
-                         <table class="invoice-items-table table table-bordered table-sm align-middle text-center mb-0">
-                             <thead class="table-light">
-                                 <tr>
-                                    <th rowspan="2" class="align-middle">ر</th>
-                                    <th rowspan="2" class="align-middle">شرح کالا / خدمات</th>
-                                    <th rowspan="2" class="align-middle">مقدار</th>
-                                    <th rowspan="2" class="align-middle">عیار/<br>سال</th>
-                                    <th colspan="3">ارزش گذاری (ریال)</th>
-                                    <th rowspan="2" class="align-middle">وضعیت تحویل</th>
-                                    <th rowspan="2" class="align-middle">مبلغ کل<br>(ریال)</th>
-                                 </tr>
-                                <tr>
-                                     <th>وزن ۷۵۰<br><small>(گرم)</small></th>
-                                    <th>نرخ واحد/<br>مظنه</th>
-                                    <th>قیمت ۱گرم<br><small>(عیار مبنا)</small></th>
-                                 </tr>
-                             </thead>
-                             <tbody>
-                                <?php // Item rows generated by controller/helper previously ?>
-                                <?php foreach ($invoiceItems as $item): ?>
-                                <tr class="item">
-                                    <td class="num small"><?php echo $item['row_num']; ?></td>
-                                    <td class="desc small text-start"> <?php // Align description left ?>
-                                        <strong><?php echo Helper::escapeHtml($item['product_type_farsi'] ?? '-'); ?></strong>
-                                         <div class="item-details text-muted">
-                                              <?php if(isset($item['gold_weight_grams']) && $item['gold_weight_grams'] > 0):?><span>وزن: <span class="number-fa"><?php echo $item['weight_formatted'];?> گ</span> / عیار: <span class="number-fa"><?php echo $item['carat_formatted'];?></span></span><?php endif;?>
-                                              <?php if(isset($item['quantity']) && $item['quantity'] > 0):?><span>تعداد: <span class="number-fa"><?php echo $item['quantity_formatted'];?> ع</span></span><?php endif;?>
-                                              <?php if(!empty($item['coin_year'])):?><span> / سال: <span class="number-fa"><?php echo Helper::escapeHtml($item['coin_year']);?></span></span><?php endif;?>
-                                              <?php if(!empty($item['melted_tag_number'])):?><span> / انگ: <?php echo Helper::escapeHtml($item['melted_tag_number']);?></span><?php endif;?>
-                                              <?php if(!empty($item['assay_office_name'])):?><span> (ری‌گیری: <?php echo Helper::escapeHtml($item['assay_office_name']);?>)</span><?php endif;?>
-                                              <?php if(!empty($item['other_coin_description'])):?><span> / <?php echo Helper::escapeHtml($item['other_coin_description']);?></span><?php endif;?>
-                                              <?php if(!empty($item['final_notes'])):?><br><i><?php echo Helper::escapeHtml($item['final_notes']);?></i><?php endif; ?>
-                                         </div>
-                                    </td>
-                                    <td class="num number-fa"><?php echo $item['quantity'] ? $item['quantity_formatted'] : $item['weight_formatted']; ?></td>
-                                    <td class="num number-fa"><?php echo $item['quantity'] ? ($item['coin_year'] ?: '-') : $item['carat_formatted']; ?></td>
-                                    <td class="num number-fa"><?php echo ($item['gold_product_type'] === 'melted' || $item['gold_product_type'] === 'used_jewelry' || $item['gold_product_type'] === 'new_jewelry' || $item['gold_product_type'] === 'bullion') ? (isset($item['calculated_weight_grams']) ? Helper::formatNumber($item['calculated_weight_grams'], 3) : '-') : '-';?></td>
-                                    <td class="money number-fa text-end"><?php echo $item['rate_display'] ?? '-'; ?> <small class="text-muted"><?php echo $item['rate_note'] ?? '';?></small></td>
-                                    <td class="money number-fa text-end"><?php echo $item['price_per_ref_gram_formatted'] ?? '-';?></td>
-                                    <td class="small"><?php echo Helper::translateDeliveryStatus($item['delivery_status'] ?? null); ?></td>
-                                    <td class="money number-fa text-end fw-bold"><?php echo $item['total_value_formatted'] ?? '-'; ?></td>
-                                </tr>
-                                 <?php endforeach; ?>
-                                 <?php // Add empty rows if needed for fixed height invoice (handled by @media print styles better) ?>
-                             </tbody>
-                             <tfoot class="border-top">
-                                <tr><td colspan="8" class="fw-bold border-0 text-start pt-2">جمع کل (ریال):</td><td class="money number-fa text-end fw-bold border-0 pt-2"><?php echo Helper::formatNumber($subTotal, 0); ?></td></tr>
-                                 <?php if ($taxAmount >= 0): // Show tax row ?>
-                                 <tr class="subtotal"><td colspan="8" class="fw-bold border-0 text-start pt-1">مالیات بر ارزش افزوده (<?php echo Helper::formatNumber($taxRatePercent, 2); ?>٪):</td><td class="money number-fa text-end fw-bold border-0 pt-1"><?php echo Helper::formatNumber($taxAmount, 0); ?></td></tr>
-                                 <?php endif; ?>
-                                 <tr class="grand-total"><td colspan="8" class="fw-bold border-0 text-start pt-2">مبلغ نهایی قابل پرداخت (ریال):</td><td class="money number-fa text-end fw-bold border-0 fs-5 pt-2"><?php echo Helper::formatNumber($grandTotal, 0); ?></td></tr>
-                                 <tr><td colspan="9" class="border-0 small text-muted text-start pt-1 pb-0"> مبلغ به حروف: <?php echo Helper::escapeHtml($grandTotalWords); ?></td></tr>
-                            </tfoot>
-                         </table>
-                    </div> <?php // end table-responsive ?>
-                 <?php else: ?>
-                     <div class="alert alert-warning">هیچ آیتمی برای نمایش در فاکتور انتخاب نشده است.</div>
-                 <?php endif; ?>
-
-
-                <?php // --- Signature Area --- ?>
-                <div class="row signature-area mt-5">
-                     <div class="col-6 text-center signature"><p>امضاء فروشنده</p></div>
-                     <div class="col-6 text-center signature"><p>امضاء خریدار</p></div>
+                <div class="table-responsive">
+                 <table class="table table-bordered table-sm align-middle text-center">
+                     <thead class="table-light">
+                         <tr>
+                             <th rowspan="2">ردیف</th>
+                             <th rowspan="2">شرح کالا</th>
+                             <th rowspan="2" class="align-middle" style="width: 4%;">مقدار</th>
+                             <th rowspan="2" class="align-middle" style="width: 3%;">عیار/سال</th>
+                             <th colspan="3" class="align-middle" style="width: 25%;">ارزش گذاری (ریال)</th>
+                             <th rowspan="2">قیمت خالص</th>
+                             <th rowspan="2">سود/اجرت</th>
+                             <th rowspan="2" class="align-middle" style="width: 6%;">وضعیت تحویل</th>
+                             <th rowspan="2">مبلغ نهایی (ریال)</th>
+                         </tr>
+                         <tr>
+                             <th>وزن ۷۵۰ (گرم)</th>
+                             <th>نرخ واحد/مظنه</th>
+                             <th>قیمت ۱گرم (مبنا)</th>
+                        </tr>
+                     </thead>
+                     <tbody>
+                        <?php foreach ($invoiceItems as $item): ?>
+                        <tr>
+                            <td><?php echo $item['row_num']; ?></td>
+                            <td class="text-start"><?php echo $item['product_type_farsi']; ?></td>
+                            <td><?php echo $item['quantity_formatted']; ?></td>
+                            <td><?php echo $item['carat_formatted']; ?></td>
+                            <td><?php echo isset($item['calculated_weight_grams']) ? Helper::formatPersianNumber($item['calculated_weight_grams'], 3) : '-'; ?></td>
+                            <td class="text-end"><?php echo $item['rate_display']; ?><br><small class="text-muted"><?php echo $item['rate_note']; ?></small></td>
+                            <td class="text-end"><?php echo $item['price_per_ref_gram_formatted']; ?></td>
+                            <td class="text-end"><?php echo $item['base_value_formatted']; ?></td>
+                            <td class="text-end"><?php echo $item['profit_wage_commission_formatted']; ?></td>
+                            <td><?php echo Helper::translateDeliveryStatus($item['delivery_status']); ?></td>
+                            <td class="text-end fw-bold"><?php echo $item['final_value_formatted']; ?></td>
+                        </tr>
+                        <?php endforeach; ?>
+                     </tbody>
+                 </table>
+                </div>
+                <div class="row justify-content-end mt-1">
+                 <div class="col-md-6">
+                     <table class="table table-sm summary-table"> <?php // افزودن کلاس ?>
+                         <tbody>
+                             <tr>
+                                 <td class="fw-bold">جمع کل (ریال):</td>
+                                 <td class="text-end"><?php echo Helper::formatRial($subTotal); ?></td>
+                             </tr>
+                             <?php if ($totalGeneralTax > 0): ?>
+                             <tr>
+                                 <td>جمع مالیات عمومی:</td>
+                                 <td class="text-end"><?php echo Helper::formatRial($totalGeneralTax); ?></td>
+                             </tr>
+                             <?php endif; ?>
+                             <?php if ($totalVat > 0): ?>
+                             <tr>
+                                 <td>جمع مالیات بر ارزش افزوده:</td>
+                                 <td class="text-end"><?php echo Helper::formatRial($totalVat); ?></td>
+                             </tr>
+                             <?php endif; ?>
+                              <tr class="table-light grand-total-row"> <?php // افزودن کلاس ?>
+                                 <td class="fw-bold fs-5">مبلغ نهایی قابل پرداخت (ریال):</td>
+                                 <td class="text-end fw-bold fs-5"><?php echo Helper::formatRial($grandTotal); ?></td>
+                             </tr>
+                         </tbody>
+                     </table>
+                     <p class="small text-muted mt-2">به حروف: <?php echo Helper::escapeHtml($grandTotalWords); ?></p>
                  </div>
+             </div>
+            <?php endif; // end of invoiceItems check ?>
 
-                 <?php // --- Invoice Footer --- ?>
-                  <div class="row invoice-footer mt-4 pt-3 text-muted small">
-                      <div class="col-sm-8 text-end">
-                          [متن ثابت توضیحات پایانی فاکتور...]
-                       </div>
-                       <div class="col-sm-4 text-start">
-                          <?php echo $sellerInfo['name']; ?> © <?php echo Helper::formatNumber(date('Y'), 0, '.', ''); ?>
-                        </div>
-                  </div>
-
-            <?php endif; // ---- END INVOICE CONTENT ---- ?>
-        </div> <?php // End Invoice Container ?>
-    </div> <?php // End Bootstrap Container ?>
+            <footer class="mt-2 pt-2">
+                 <div class="row signature-area">
+                    <div class="col-6 text-center border-top pt-1"><p>امضاء فروشنده</p></div>
+                    <div class="col-6 text-center border-top pt-1"><p>امضاء خریدار</p></div>
+                 </div>
+                 <div class="text-center text-muted small mt-0">
+                     <p>فروش آغاز یک تعهد است ، تعهد ما ضمانت اصالت ، کیفیت و قیمت رقابتی است </p>
+                 </div>
+            </footer>
+        <?php endif; ?>
+    </div>
 
     <?php // Bootstrap JS (needed for tooltips if used in future) ?>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="<?php echo $baseUrl; ?>/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>

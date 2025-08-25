@@ -1,59 +1,38 @@
 <?php
-// public/index.php - Front Controller اصلی برنامه حسابداری طلا
+// public/index.php - Front Controller (FINAL STABLE VERSION)
 
-declare(strict_types=1); // فعال کردن Strict Types برای بهبود کیفیت کد
+declare(strict_types=1);
 
 // --- Maintenance Mode Check ---
-// IMPORTANT: Adjust path if root is detected differently or if maintenance file is elsewhere
-$maintenanceFile = dirname(__DIR__) . '/.maintenance'; // Assumes root is one level above public/
+$maintenanceFile = dirname(__DIR__) . '/.maintenance';
 if (file_exists($maintenanceFile)) {
     header('HTTP/1.1 503 Service Temporarily Unavailable');
-    header('Status: 503 Service Temporarily Unavailable');
-    header('Retry-After: 3600'); // Try again in 1 hour
-    // Optional: Load a dedicated maintenance page
-    // include(dirname(__DIR__) . '/views/maintenance.html');
-    echo '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>در حال به روز رسانی</title><style>body{font-family: sans-serif; background-color: #f1f1f1; padding: 50px; text-align: center;} h1{color: #555;} p{color: #777;}</style></head><body><h1>سامانه در حال به روز رسانی است</h1><p>لطفاً چند دقیقه دیگر دوباره تلاش کنید.</p></body></html>';
+    header('Retry-After: 3600');
+    echo '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>در حال به روز رسانی</title></head><body><h1>سامانه در حال به روز رسانی است</h1><p>لطفاً چند دقیقه دیگر دوباره تلاش کنید.</p></body></html>';
     exit;
 }
-// --- End Maintenance Mode Check ---
 
-// --- سطح 0: راه‌اندازی اولیه و بارگذاری Autoloader ---
-
-// تعریف مسیر ریشه پروژه (یک سطح بالاتر از public). مهم برای دسترسی به سایر پوشه‌ها.
 define('ROOT_PATH', dirname(__DIR__));
 
-// بارگذاری Autoloader تولید شده توسط Composer.
-// در صورت عدم وجود، برنامه نمی تواند ادامه دهد.
 if (!file_exists(ROOT_PATH . '/vendor/autoload.php')) {
-    // لاگ کردن این خطا بسیار دشوار است چون Logger هنوز راه اندازی نشده
-    error_log("FATAL ERROR: Composer autoload file not found at " . ROOT_PATH . '/vendor/autoload.php');
+    error_log("FATAL ERROR: Composer autoload file not found.");
     http_response_code(500);
-    // پیام بسیار عمومی چون سیستم قادر به نمایش صفحه خطا نیست
-    die("System configuration error. Please contact support.");
+    die("System configuration error.");
 }
 require ROOT_PATH . '/vendor/autoload.php';
 
-
-// --- استفاده از کلاس‌هایی که در این فایل به آن‌ها نیاز داریم ---
-// PSR Interfaces
-use Psr\Log\LogLevel;
-
-// Vendor Classes
+// --- Use Statements ---
 use Monolog\Logger;
 use Monolog\Handler\StreamHandler;
 use Monolog\Formatter\LineFormatter;
 use Dotenv\Dotenv;
 use FastRoute\Dispatcher;
 use FastRoute\RouteCollector;
-//use PDO;
-
-// Core Classes
 use App\Core\Database;
 use App\Core\ErrorHandler;
 use App\Core\ViewRenderer;
-
-// Utilities
-use App\Utils\Helper; // فرض وجود کلاس Helper
+use App\Core\FormBuilder;
+use App\Utils\Helper;
 
 // Repositories
 use App\Repositories\ActivityLogRepository;
@@ -74,6 +53,8 @@ use App\Repositories\InventoryLedgerRepository;
 use App\Repositories\TransactionItemRepository;
 use App\Repositories\InitialBalanceRepository;
 use App\Repositories\InventoryCalculationRepository;
+use App\Repositories\ContactWeightLedgerRepository;
+use App\Repositories\PhysicalSettlementRepository;
 
 // Services
 use App\Services\ApiClient;
@@ -85,10 +66,13 @@ use App\Services\LicenseService;
 use App\Services\MonitoringService;
 use App\Services\SecurityService;
 use App\Services\UpdateService;
-use App\Services\UserService; // اضافه شد
+use App\Services\UserService;
 use App\Services\GoldPriceService;
 use App\Services\InitialBalanceService;
 use App\Services\InventoryCalculationService;
+use App\Services\MetadataService;
+use App\Services\FormulaService;
+use App\Services\TransactionService;
 
 // Controllers (فقط نام کامل برای تعریف مسیر، نمونه سازی در زمان dispatch)
 use App\Controllers\AbstractController;
@@ -114,6 +98,14 @@ use App\Controllers\ProductCategoryController;
 use App\Controllers\ProductController;
 use App\Controllers\ApiController;
 use App\Controllers\InitialBalanceController;
+use App\Controllers\InventoryCalculationController;
+use App\Controllers\ContactWeightLedgerController;
+use App\Controllers\SettlementController;
+
+// **کلاس‌های جدید مدل اینجا اضافه میشوند (برای خوانایی بهتر)**
+use App\Models\ContactWeightLedger;
+use App\Models\PhysicalSettlement;
+use App\Models\PhysicalSettlementItem;
 
 // --- سطح 1: بارگذاری متغیرهای محیطی و تنظیمات ---
 
@@ -305,10 +297,27 @@ try {
     $logger->info("------------- Application Start -------------");
     $logger->info("Monolog Logger initialized.", ['level' => $logLevelString]);
 
-} catch (Throwable $e) {
-    error_log("FATAL ERROR: Failed during logger initialization: " . $e->getMessage());
-    http_response_code(500); die("System initialization error: Cannot configure logging.");
-}
+    } catch (Throwable $e) {
+        error_log("FATAL ERROR: Failed during logger initialization: " . $e->getMessage());
+        http_response_code(500); die("System initialization error: Cannot configure logging.");
+    }
+
+    // --- سطح 4.5: بارگذاری سراسری تنظیمات Fields و Formulas ---
+    $config['app']['global_json_strings'] = ['fields' => '[]', 'formulas' => '[]']; // Defaults as string
+    try {
+        $fieldsJsonPath = $config['paths']['config'] . '/fields.json';
+        $formulasJsonPath = $config['paths']['config'] . '/formulas.json';
+        
+        $fieldsData = file_exists($fieldsJsonPath) ? json_decode(file_get_contents($fieldsJsonPath), true)['fields'] ?? [] : [];
+        $formulasData = file_exists($formulasJsonPath) ? json_decode(file_get_contents($formulasJsonPath), true)['formulas'] ?? [] : [];
+        
+        $logger->info("Loaded " . count($fieldsData) . " fields and " . count($formulasData) . " formulas.");
+
+    } catch (Throwable $e) {
+        $logger->error("Exception during global JSON config loading.", ['exception' => $e]);
+    }
+    // --- پایان سطح 4.5 ---
+
 
 // 5. راه‌اندازی Session ها
 $sessionSavePath = $config['session']['save_path'];
@@ -390,13 +399,12 @@ try {
 // Initialize Repositories
 // $productRepository = new ProductRepository($db, $logger); // REMOVED - Moved into services array
 $contactRepository = new ContactRepository($db, $logger);
-// $inventoryLedgerRepository = new InventoryLedgerRepository($db, $logger); // REMOVED - Moved into services array
-// $userRepository = new UserRepository($db, $logger); // REMOVED - Moved into services array
+
 
 // Initialize Services
 $services = [];
 try {
-    // Repositories (mostly need DB and Logger)
+    // Repositories (این بخش را قبلا داشته‌اید)
     $services['activityLogRepository'] = new ActivityLogRepository($db, $logger);
     $services['assayOfficeRepository'] = new AssayOfficeRepository($db, $logger);
     $services['bankAccountRepository'] = new BankAccountRepository($db, $logger);
@@ -409,107 +417,57 @@ try {
     $services['productRepository'] = new ProductRepository($db, $logger);
     $services['productCategoryRepository'] = new ProductCategoryRepository($db, $logger);
     $services['transactionItemRepository'] = new TransactionItemRepository($db, $logger);
-    $services['transactionRepository'] = new TransactionRepository($db, $logger, $services['transactionItemRepository']);
+    $services['transactionRepository'] = new TransactionRepository($db, $logger); // وابستگی به آیتم حذف شد چون در سرویس مدیریت میشود
     $services['userRepository'] = new UserRepository($db, $logger);
     $services['updateHistoryRepository'] = new UpdateHistoryRepository($db, $logger);
     $services['initialBalanceRepository'] = new InitialBalanceRepository($db, $logger);
     $services['settingsRepository'] = new SettingsRepository($db, $logger);
-    $services['goldPriceService'] = new GoldPriceService($services['settingsRepository'], $logger);
     $services['inventoryCalculationRepository'] = new InventoryCalculationRepository($db, $logger);
+    // Services (ترتیب در اینجا بسیار مهم است)
+    $services['goldPriceService'] = new GoldPriceService($services['settingsRepository'], $logger);
+    $services['settlementRepository'] = new App\Repositories\PhysicalSettlementRepository($db, $logger); // <-- این خط بسیار مهم است
+    $services['contactWeightLedgerRepository'] = new App\Repositories\ContactWeightLedgerRepository($db, $logger);
     $logger->debug("Repositories initialized.");
-    // ساخت ApiClient با وابستگی‌های جدید
-    $services['apiClient'] = new ApiClient(
-        $config['license']['api_url'] ?? '', // Get API URL from config
-        $logger,
-        $services['settingsRepository'],   // <--- پاس دادن نمونه SettingsRepository
-        $config,                           // <--- پاس دادن آرایه کامل config
-        null,                             // <--- SecurityService هنوز ساخته نشده
-        15,                               // <--- timeout
-        10                                // <--- connectTimeout
+
+    // ابتدا فایل‌های JSON را می‌خوانیم
+    $fieldsJsonPath = $config['paths']['config'] . '/fields.json';
+    $formulasJsonPath = $config['paths']['config'] . '/formulas.json';
+    $fields = json_decode(file_get_contents($fieldsJsonPath), true)['fields'] ?? [];
+    $formulas = json_decode(file_get_contents($formulasJsonPath), true)['formulas'] ?? [];
+    // FormulaService باید قبل از TransactionService ساخته شود
+    $services['formulaService'] = new FormulaService($logger, $formulas, $fields);
+    $services['apiClient'] = new ApiClient($config['license']['api_url'] ?? '', $logger, $services['settingsRepository'], $config, null);
+    $services['securityService'] = new SecurityService($logger, $services['apiClient'], $db, $config);
+    $services['apiClient']->setSecurityService($services['securityService']); // وابستگی چرخه‌ای حل شد
+    $services['licenseService'] = new LicenseService($services['licenseRepository'], $services['apiClient'], $services['securityService'], $services['settingsRepository'], $logger, $config);
+    $services['authService'] = new AuthService($services['userRepository'], $services['securityService'], $logger, $config);
+    $services['userService'] = new UserService($services['userRepository'], $services['securityService'], $logger, $config);
+    $services['databaseService'] = new DatabaseService($db, $logger);
+    $services['backupService'] = new BackupService($db, $logger, $config, $config['paths']['root'], ROOT_PATH . '/backups');
+    $services['deliveryService'] = new DeliveryService($services['transactionRepository'],$services['inventoryRepository'],$services['coinInventoryRepository'],$services['transactionItemRepository'],$services['productRepository'],$services['contactWeightLedgerRepository'],  $logger, $db);
+    $services['initialBalanceService'] = new InitialBalanceService($services['initialBalanceRepository'], $services['inventoryRepository'], $services['transactionRepository'], $logger);
+    $services['inventoryCalculationService'] = new InventoryCalculationService($services['inventoryCalculationRepository'], $services['productRepository'], $logger);
+    $services['updateService'] = new UpdateService($services['apiClient'], $logger, $config, $services['settingsRepository'], $services['backupService'], $services['licenseService'], $config['paths']['root'], $services['updateHistoryRepository']);
+    $services['monitoringService'] = new MonitoringService($services['apiClient'], $logger, $config, $services['activityLogRepository'], $services['userRepository'], $services['licenseService'], $services['securityService'], $services['updateService']);
+    $services['metadataService'] = new MetadataService($logger, $fieldsData, $formulasData); // <-- سرویس جدید
+    $services['formulaService'] = new FormulaService($logger, $formulasData, $fieldsData);
+    $services['productCategoryRepository'] = new ProductCategoryRepository($db, $logger);
+    $services['transactionItemRepository'] = new TransactionItemRepository($db, $logger);
+
+
+   // ** TransactionService  تزریق وابستگی جدید به **
+    $services['transactionService'] = new TransactionService(
+        $db, $logger,
+        $services['transactionRepository'],
+        $services['transactionItemRepository'],
+        $services['productRepository'],
+        $services['formulaService'],
+        $services['contactWeightLedgerRepository'],
+        $services['inventoryLedgerRepository'], // <-- Argument 8 (newly added)
+        $services['inventoryRepository'],     // <-- Argument 9 (newly added)
+        $services['coinInventoryRepository']   // <-- Argument 10 (newly added)
     );
-    $logger->info("ApiClient initialized with new dependencies."); // لاگ برای تایید
-
-    // Core Services (dependencies vary)
-    // SecurityService بعد از ApiClient ساخته می‌شود
-    $services['securityService'] = new SecurityService(
-        $logger,
-        $services['apiClient'],
-        $db,
-        $config
-    );
-
-    // به‌روزرسانی ApiClient با SecurityService
-    $services['apiClient']->setSecurityService($services['securityService']);
-
-    $services['licenseService'] = new LicenseService(
-        $services['licenseRepository'],   // آرگومان اول: LicenseRepository
-        $services['apiClient'],           // آرگومان دوم: ApiClient
-        $services['securityService'],     // آرگومان سوم: SecurityService
-        $services['settingsRepository'],  // آرگومان چهارم: SettingsRepository
-        $logger,                          // آرگومان پنجم: Logger
-        $config                           // آرگومان ششم: config
-    );
-    $services['authService'] = new AuthService( // Needs UserRepo, Security, Logger, Config
-        $services['userRepository'],
-        $services['securityService'],
-        $logger,
-        $config
-    );
-     $services['userService'] = new UserService( // Needs UserRepo, Security, Logger, Config
-         $services['userRepository'],
-         $services['securityService'],
-         $logger,
-         $config
-     );
-     $services['databaseService'] = new DatabaseService($db, $logger); // Needs DB, Logger (for optimize etc)
-     $services['backupService'] = new BackupService(
-         $db,
-         $logger,
-         $config,
-         $config['paths']['root'], // از $config['paths'] استفاده شده که صحیح است
-         $config['paths']['root'] . '/backups' // مسیر بکاپ
-     );
-     $services['deliveryService'] = new DeliveryService(
-         $services['transactionRepository'],
-         $services['inventoryRepository'],
-         $services['coinInventoryRepository'],
-         $logger,
-         $db
-     );
-     $services['initialBalanceService'] = new InitialBalanceService(
-         $services['initialBalanceRepository'],
-         $services['inventoryRepository'],
-         $services['transactionRepository'],
-         $logger
-     );
-     $services['inventoryCalculationService'] = new InventoryCalculationService(
-         $services['inventoryCalculationRepository'],
-         $services['productRepository'],
-         $logger
-     );
-     $services['updateService'] = new UpdateService(
-         $services['apiClient'],
-         $logger,
-         $config,
-         $services['settingsRepository'],
-         $services['backupService'],
-         $services['licenseService'],
-         $config['paths']['root'],
-         $services['updateHistoryRepository']
-     );
-     $services['monitoringService'] = new MonitoringService( // Needs many dependencies
-         $services['apiClient'],
-         $logger,
-         $config,
-         $services['activityLogRepository'],
-         $services['userRepository'],
-         $services['licenseService'],
-         $services['securityService'],
-         $services['updateService']
-     );
-
-     $logger->info("All Repositories and Services initialized.");
-
+    $logger->info("All Repositories and Services initialized.");
 } catch (Throwable $e) {
      // این بخش برای گرفتن خطاهای زمان مقداردهی سرویس‌ها بسیار مهم است
      $logger->critical("FATAL ERROR: Failed to initialize core services or repositories.", ['exception' => (string)$e]); // تبدیل exception به string برای لاگ بهتر
@@ -666,13 +624,16 @@ $dispatcher = FastRoute\simpleDispatcher(function(RouteCollector $r) use ($confi
     $r->addRoute('POST', $appPrefix.'/product-categories/save', [ProductCategoryController::class, 'save']);
     $r->addRoute('POST', $appPrefix.'/product-categories/delete/{id:\d+}', [ProductCategoryController::class, 'delete']);
     
-    // Product Management
+    
+    // Product Management (REVISED ROUTES)
     $r->addRoute('GET', $appPrefix.'/products', [ProductController::class, 'index']);
     $r->addRoute('GET', $appPrefix.'/products/add', [ProductController::class, 'showAddForm']);
     $r->addRoute('GET', $appPrefix.'/products/edit/{id:\d+}', [ProductController::class, 'showEditForm']);
-    $r->addRoute('POST', $appPrefix.'/products/store', [ProductController::class, 'save']);
-    $r->addRoute('POST', $appPrefix.'/products/update/{id:\d+}', [ProductController::class, 'save']);
+    // **FIX: Both ADD and EDIT forms will POST to the same universal save method.**
+    // The save method will determine if it's an add or edit based on the presence of an ID.
+    $r->addRoute('POST', $appPrefix.'/products/save[/{id:\d+}]', [ProductController::class, 'save']); // <-- مسیر اصلاح شده
     $r->addRoute('POST', $appPrefix.'/products/delete/{id:\d+}', [ProductController::class, 'delete']);
+
     
     // Payments Management
     $r->addRoute('GET', $appPrefix.'/payments', [PaymentController::class, 'index']);
@@ -685,10 +646,15 @@ $dispatcher = FastRoute\simpleDispatcher(function(RouteCollector $r) use ($confi
     $r->addRoute('GET', $appPrefix.'/transactions', [TransactionController::class, 'index']);
     $r->addRoute('GET', $appPrefix.'/transactions/add', [TransactionController::class, 'showAddForm']);
     $r->addRoute('GET', $appPrefix.'/transactions/edit/{id:\d+}', [TransactionController::class, 'showEditForm']);
-    $r->addRoute('POST', $appPrefix.'/transactions/save', [TransactionController::class, 'save']);
-    $r->addRoute('POST', $appPrefix.'/transactions/update/{id:\d+}', [TransactionController::class, 'save']);
+    $r->addRoute('POST', $appPrefix.'/transactions/save', [TransactionController::class, 'save']); // برای ایجاد معامله جدید
+    $r->addRoute('POST', $appPrefix.'/transactions/save/{id:\d+}', [TransactionController::class, 'save']); // (اصلاح شده) برای به‌روزرسانی معامله موجود
     $r->addRoute('POST', $appPrefix.'/transactions/delete/{id:\d+}', [TransactionController::class, 'delete']);
     $r->addRoute('POST', $appPrefix.'/transactions/complete-delivery/{id:\d+}/{action:receipt|delivery}', [TransactionController::class, 'completeDeliveryAction']);
+    //مسیر تسویه فیزیکی
+    $r->addRoute('GET', $appPrefix.'/settlements/add', [SettlementController::class, 'showForm']);
+    $r->addRoute('POST', $appPrefix.'/settlements/save', [SettlementController::class, 'save']);
+    // همچنین مسیر برای نمایش کاردکس وزنی
+    $r->addRoute('GET', $appPrefix.'/contacts/weight-ledger/{id:\d+}', [ContactController::class, 'showWeightLedger']);
 
     // Inventory Management
     $r->addRoute('GET', $appPrefix.'/inventory', [InventoryController::class, 'index']);
@@ -736,8 +702,9 @@ $dispatcher = FastRoute\simpleDispatcher(function(RouteCollector $r) use ($confi
     $r->addRoute('GET', $appPrefix.'/system/download-backup/{filename}', [SystemController::class, 'downloadBackup']);
 
     // --- API Endpoints (e.g., for AJAX calls from frontend) ---
-    $r->addRoute('POST', '/api/send-activation-info', [ApiController::class, 'sendActivationInfo']); // مسیر جدید برای ارسال اطلاعات فعال‌سازی
-    // Example: $r->addRoute('GET', '/api/contacts/search', [ContactController::class, 'searchApi']);
+    $r->addRoute('POST', '/api/calculate', [\App\Controllers\ApiController::class, 'calculate']);
+    $r->addRoute('POST', '/api/calculate-item', [\App\Controllers\ApiController::class, 'calculateItem']); // <-- این خط را اضافه کنید
+    $r->addRoute('POST', '/api/send-activation-info', [\App\Controllers\ApiController::class, 'sendActivationInfo']);
 
     // Initial Balance Routes
     $r->addRoute('GET', $appPrefix.'/initial-balance', [InitialBalanceController::class, 'index']);

@@ -139,6 +139,18 @@ abstract class AbstractController {
     }
 
     /**
+     * ALIAS for setSessionMessage for easier backward compatibility.
+     * Sets a flash message in the session.
+     *
+     * @param string $message The message text.
+     * @param string $type Message type ('success', 'danger', 'warning', 'info').
+     */
+    protected function setFlashMessage(string $message, string $type = 'info'): void
+    {
+        $this->setSessionMessage($message, $type);
+    }
+
+    /**
      * Gets a flash message from the session and removes it.
      * * @param string $key Session key for the message (default 'default').
      * @return array|null Message array with 'text' and 'type' keys, or null if not found.

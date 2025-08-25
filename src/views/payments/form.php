@@ -2,9 +2,10 @@
 /**
  * Template: src/views/payments/form.php
  * Form for adding or editing a Payment/Receipt.
+ * REVISED: Fix datepicker persian digits and formatting on load, re-enabled method details.
  */
-use App\Utils\Helper;
-use Morilog\Jalali\Jalalian;
+use App\Utils\Helper; // Already imported Helper, assuming latest version.
+use App\Core\CSRFProtector;
 
 $isEditMode = $viewData['is_edit_mode'] ?? false;
 $pageTitle = $viewData['page_title'] ?? ($isEditMode ? 'ویرایش پرداخت/دریافت' : 'ثبت پرداخت/دریافت');
@@ -12,16 +13,15 @@ $formAction = $viewData['form_action'] ?? '';
 $payment = $viewData['payment'] ?? [];
 $contacts = $viewData['contacts'] ?? [];
 $bankAccounts = $viewData['bank_accounts'] ?? [];
-$transactions = $viewData['transactions'] ?? [];
+$transactions = $viewData['transactions'] ?? []; // These should come formatted for display in dropdown.
 $paymentMethods = $viewData['payment_methods'] ?? [];
 $submitButtonText = $viewData['submit_button_text'] ?? ($isEditMode ? 'به‌روزرسانی' : 'ثبت');
 $errorMessage = $viewData['error_message'] ?? null;
 $loadingError = $viewData['loading_error'] ?? null;
-$baseUrl = $viewData['baseUrl'] ?? ($this->config['app']['base_url'] ?? '');
+$baseUrl = $viewData['baseUrl'] ?? '';
 
 $initialDirection = $payment['direction'] ?? 'outflow';
-if (!empty($payment['source_bank_account_id'])) $initialDirection = 'outflow';
-elseif (!empty($payment['destination_bank_account_id'])) $initialDirection = 'inflow';
+// Determine initial bank selection for disabled state
 $isBankSelected = !empty($payment['source_bank_account_id']) || !empty($payment['destination_bank_account_id']);
 ?>
 
@@ -38,7 +38,7 @@ $isBankSelected = !empty($payment['source_bank_account_id']) || !empty($payment[
 <?php endif; ?>
 
 <div class="card shadow-sm mb-4">
-    <div class="card-header"><h5 class="mb-0"><?php echo $isEditMode ? 'ویرایش رکورد #' . Helper::escapeHtml($payment['id'] ?? '') : 'ورود اطلاعات جدید'; ?></h5></div>
+    <div class="card-header"><h5 class="mb-0"><?php echo $isEditMode ? 'ویرایش رکورد #' . Helper::formatPersianNumber($payment['id'] ?? '') : 'ورود اطلاعات جدید'; ?></h5></div>
     <div class="card-body">
         <?php if ($loadingError && empty($contacts)): ?>
             <p class="text-danger">پیش‌نیازهای فرم بارگذاری نشدند.</p>
@@ -78,8 +78,8 @@ $isBankSelected = !empty($payment['source_bank_account_id']) || !empty($payment[
                     </div>
                 </div>
 
-                <?php // FIX: Re-inlined the payment method details fieldsets to fix the include error. ?>
                 <div id="payment-method-details-container" class="mb-3">
+                    <?php // The content of fieldsets below moved back directly here per latest provided template. ?>
                     <fieldset id="details-cash" class="payment-details-section border p-3 rounded bg-light" style="display: none;">
                         <legend class="fs-6 fw-normal text-muted w-auto px-2 mb-3">جزئیات نقدی</legend>
                         <div class="mb-3">
@@ -210,12 +210,9 @@ $isBankSelected = !empty($payment['source_bank_account_id']) || !empty($payment[
                          <select class="form-select form-select-sm" id="related_transaction_id" name="related_transaction_id">
                              <option value="">-- انتخاب --</option>
                              <?php foreach ($transactions as $tx): ?>
-                                 <?php // FIX: Added isset() to prevent error on missing keys ?>
-                                 <?php if(isset($tx['id'], $tx['transaction_type'], $tx['contact_name'])): ?>
                                  <option value="<?php echo (int)$tx['id']; ?>" <?php echo (($payment['related_transaction_id'] ?? null) == $tx['id']) ? 'selected' : ''; ?>>
-                                      <?php echo '#' . $tx['id'] . ': ' . ($tx['transaction_type']=='buy'?'خرید':'فروش') . ' از/به ' . Helper::escapeHtml($tx['contact_name']); ?>
+                                      <?php echo Helper::escapeHtml($tx['display']); // Assuming display string is now directly from controller. ?>
                                   </option>
-                                  <?php endif; ?>
                               <?php endforeach; ?>
                           </select>
                      </div>
@@ -277,8 +274,21 @@ document.addEventListener('DOMContentLoaded', function() {
     togglePaymentDetails(paymentMethodSelect.value);
 
     if (typeof jalaliDatepicker !== 'undefined') {
-        jalaliDatepicker.startWatch({ selector: '.jalali-datepicker', time: true });
-        jalaliDatepicker.startWatch({ selector: '.jalali-datepicker-nodate', time: false });
+        jalaliDatepicker.startWatch({ selector: '.jalali-datepicker', time: true, persianDigits: true }); // Enable persianDigits for main datepicker
+        jalaliDatepicker.startWatch({ selector: '.jalali-datepicker-nodate', time: false, persianDigits: true }); // Enable persianDigits for others
     }
+    
+    // AutoNumeric init for amounts input.
+    if (typeof AutoNumeric !== 'undefined') {
+        new AutoNumeric('#amount_rials', {
+            digitGroupSeparator: ',',
+            decimalCharacter: '.',
+            decimalPlaces: 0, // No decimals for Rials
+            digitalGroupSpacing: '3'
+        });
+    } else {
+        console.warn("AutoNumeric library not found for payment form.");
+    }
+
 });
 </script>

@@ -8,19 +8,18 @@ namespace App\Models; // Namespace صحیح
  */
 class ProductCategory {
     public ?int $id = null;
-    public string $name = '';
+    public ?string $name = null;
     public ?string $code = null;
     public ?string $base_category = null;
     public ?string $description = null;
-    public bool $requires_carat = false;
-    public bool $requires_weight = false;
-    public bool $requires_quantity = true; // Defaulting to true as per most common use cases
-    public bool $requires_coin_year = false;
-    public ?string $unit_of_measure = null; // e.g., 'piece', 'gram', 'mesghal'
+    public ?bool $requires_carat = null;
+    public ?bool $requires_weight = null;
+    public ?bool $requires_quantity = null;
+    public ?bool $requires_coin_year = null;
+    public ?string $unit_of_measure = null;
     public ?string $created_at = null;
+    public ?bool $is_active = null;
     public ?string $updated_at = null;
-    public bool $is_active = true; // <<<< اضافه شد - مقدار پیش‌فرض برای آیتم جدید true باشد
-
 
     /**
      * Constructor to hydrate the object from an associative array (e.g., from DB).

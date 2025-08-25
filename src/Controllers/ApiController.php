@@ -1,22 +1,26 @@
 <?php
-
+// src/Controllers/ApiController.php
 namespace App\Controllers;
 
-use App\Services\EmailService;
-use Exception;
-use PDO;
-use Monolog\Logger;
 use App\Core\ViewRenderer;
+use App\Models\Product; // Make sure Product is imported
+use App\Repositories\ProductRepository; // Make sure ProductRepository is imported
+use App\Services\TransactionService; // Make sure TransactionService is imported
+use App\Services\EmailService; // Ensure EmailService is imported if used
+use App\Services\FormulaService; // Ensure FormulaService is imported if used
+use App\Utils\Helper; // Import Helper for sanitization
+use Monolog\Logger;
+use PDO;
+use Throwable;
+use Exception; // Explicitly import Exception
 
-// FIX: ارث‌بری از AbstractController برای دسترسی به وابستگی‌ها و متدهای کمکی
 class ApiController extends AbstractController
 {
-    private EmailService $emailService;
+    private TransactionService $transactionService;
+    private ProductRepository $productRepository;
+    private ?EmailService $emailService; // Assuming it's still optional here
+    private FormulaService $formulaService; // Ensure this is also assigned properly
 
-    /**
-     * FIX: اضافه کردن سازنده (Constructor) برای تزریق وابستگی‌ها
-     * این متد وابستگی‌های مورد نیاز را از کانتینر سرویس‌ها دریافت می‌کند.
-     */
     public function __construct(
         PDO $db,
         Logger $logger,
@@ -24,26 +28,113 @@ class ApiController extends AbstractController
         ViewRenderer $viewRenderer,
         array $services
     ) {
-        // فراخوانی سازنده والد برای مقداردهی اولیه تمام وابستگی‌های اصلی
         parent::__construct($db, $logger, $config, $viewRenderer, $services);
 
-        // FIX: دریافت EmailService از کانتینر سرویس‌ها
-        if (!isset($services['emailService']) || !$services['emailService'] instanceof EmailService) {
-            // اگر سرویس مورد نیاز یافت نشد، یک استثنا ایجاد می‌کنیم تا از خطاهای بعدی جلوگیری شود
-            throw new Exception('EmailService not found or invalid for ApiController.');
+        // --- Services Initialization (CRITICAL FIX: Added productRepository) ---
+        if (!isset($services['transactionService']) || !$services['transactionService'] instanceof TransactionService) {
+            throw new Exception('TransactionService not found or invalid for ApiController.');
         }
-        $this->emailService = $services['emailService'];
+        $this->transactionService = $services['transactionService'];
+
+        if (!isset($services['productRepository']) || !$services['productRepository'] instanceof ProductRepository) {
+            throw new Exception('ProductRepository not found or invalid for ApiController.');
+        }
+        $this->productRepository = $services['productRepository']; // FIX: This was missing
+
+        if (!isset($services['formulaService']) || !$services['formulaService'] instanceof FormulaService) {
+            throw new Exception('FormulaService not found or invalid for ApiController.');
+        }
+        $this->formulaService = $services['formulaService']; // Ensure FormulaService is also assigned to property
+
+        // EmailService is optional
+        $this->emailService = $services['emailService'] ?? null; 
+        // --- End Services Initialization ---
+        
         $this->logger->debug("ApiController initialized correctly.");
     }
 
+    /**
+     * A generic calculate method. If it's used, ensure its logic is implemented.
+     * Route: /api/calculate (POST)
+     */
+    public function calculate(): void
+    {
+        // This method's logic should be specific to what /api/calculate does.
+        // If it's for the separate calculator module, its implementation would be different.
+        // For now, if you are not actively using this specific route for transactions,
+        // it can remain as a basic placeholder or be fleshed out later.
+        
+        // This is generic placeholder response.
+        $this->jsonResponse(['success' => false, 'message' => 'Generic calculate endpoint not implemented.'], 405);
+        return;
+    }
 
     /**
-     * ارسال اطلاعات فعال‌سازی به پشتیبانی
+     * Returns all calculable values for a transaction item row.
+     * Route: /api/calculate-item (POST)
      */
-    public function sendActivationInfo()
+    public function calculateItem(): void
     {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            $this->jsonResponse(['success' => false, 'message' => 'Invalid request method.'], 405);
+            return;
+        }
+
         try {
-            // دریافت داده‌های JSON از بدنه درخواست
+            $jsonInput = file_get_contents('php://input');
+            $inputValues = json_decode($jsonInput, true);
+
+            if (json_last_error() !== JSON_ERROR_NONE) {
+                throw new Exception('Invalid JSON payload.');
+            }
+
+            $productId = $inputValues['product_id'] ?? null;
+            if (!$productId) {
+                $this->jsonResponse(['success' => false, 'message' => 'Product ID is required for item calculation.'], 400);
+                return;
+            }
+
+            // Using findByIdWithCategory to ensure product category data is available.
+            $product = $this->productRepository->findByIdWithCategory($productId);
+            if (!$product) {
+                $this->jsonResponse(['success' => false, 'message' => 'Product not found for item calculation.'], 404);
+                return;
+            }
+
+            // Sanitize mazaneh_price before passing it to the Transaction model.
+            $cleanedMazanehPrice = Helper::sanitizeFormattedNumber($inputValues['mazaneh_price'] ?? 0);
+            $mockTransaction = new \App\Models\Transaction(['mazaneh_price' => $cleanedMazanehPrice]);
+
+
+            $calculatedItemData = $this->transactionService->recalculateItemOnServer(
+                $inputValues, // Renamed from requestData to inputValues for consistency
+                $mockTransaction,
+                $product
+            );
+
+            $this->jsonResponse(['success' => true, 'data' => $calculatedItemData], 200);
+
+        } catch (Throwable $e) {
+            $this->logger->error("API item calculation error.", ['exception' => $e, 'request_data' => $inputValues]);
+            $errorMessage = 'Calculation error: ' . $e->getMessage();
+            if ($this->config['app']['debug']) {
+                $errorMessage .= " (Detail: " . $e->getMessage() . " in " . $e->getFile() . " on line " . $e->getLine() . ")";
+            }
+            $this->jsonResponse(['success' => false, 'message' => $errorMessage], 500);
+        }
+    }
+
+    /**
+     * Sends activation info to support.
+     */
+    public function sendActivationInfo(): void
+    {
+        if (!$this->emailService) {
+            $this->jsonResponse(['success' => false, 'message' => 'Email service is not configured.'], 501);
+            return;
+        }
+
+        try {
             $json = file_get_contents('php://input');
             $data = json_decode($json, true);
 
@@ -51,7 +142,6 @@ class ApiController extends AbstractController
                 throw new Exception('داده‌های ارسالی نامعتبر است.');
             }
 
-            // اعتبارسنجی فیلدهای ضروری
             $requiredFields = ['domain', 'hardware_id', 'request_code'];
             foreach ($requiredFields as $field) {
                 if (empty($data[$field])) {
@@ -59,20 +149,14 @@ class ApiController extends AbstractController
                 }
             }
             
-            // FIX: دسترسی صحیح به تنظیمات از طریق پراپرتی $this->config
-            // این پراپرتی در AbstractController مقداردهی شده است.
-            $supportEmail = $this->config['app']['support_email'] ?? 'accsupport@rar-co.ir';
-
-            // FIX: استفاده از سرویس ایمیل که در سازنده تزریق شده است
-            // متد sendActivationInfo در EmailService باید فقط آرایه داده‌ها را دریافت کند.
+            // Assuming sendActivationInfo method exists in EmailService and accepts an array.
             $this->emailService->sendActivationInfo($data);
 
             $this->logger->info('اطلاعات فعال‌سازی با موفقیت به پشتیبانی ارسال شد.', [
                 'domain' => $data['domain'],
-                'hardware_id' => '...' . substr($data['hardware_id'], -12) // لاگ کردن بخش کوچکی از شناسه برای امنیت
+                'hardware_id' => '...' . substr($data['hardware_id'], -12) // Log partial for security
             ]);
             
-            // FIX: استفاده از متد jsonResponse که از AbstractController به ارث رسیده است
             $this->jsonResponse(['success' => true, 'message' => 'اطلاعات با موفقیت به پشتیبانی ارسال شد.']);
 
         } catch (Exception $e) {
@@ -80,11 +164,10 @@ class ApiController extends AbstractController
                 'error' => $e->getMessage(),
             ]);
 
-            // FIX: استفاده از متد jsonResponse برای ارسال خطای استاندارد
             $this->jsonResponse([
                 'success' => false,
                 'message' => 'خطا در ارسال اطلاعات به پشتیبانی: ' . $e->getMessage()
-            ], 500); // ارسال کد وضعیت 500 برای خطای سرور
+            ], 500);
         }
     }
 }

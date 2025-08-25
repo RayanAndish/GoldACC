@@ -3,105 +3,95 @@
 namespace App\Models;
 
 /**
- * Class Product
+ * Class Product (Refactored for New Tax Logic)
  * Represents a record from the 'products' table.
  */
-class Product {
+class Product
+{
     public ?int $id = null;
     public string $name = '';
     public ?int $category_id = null;
     public ?string $product_code = null;
-    public string $unit_of_measure = 'gram'; // Added: Default 'gram'
+    public string $unit_of_measure = 'gram';
     public ?string $description = null;
-    public ?float $default_carat = null; // Using float, adjust if a more precise type like decimal is needed and handled
+    public ?float $default_carat = null;
     public bool $is_active = true;
-    public ?float $quantity = null;
-    public ?float $weight = null;
-    public ?int $coin_year = null;
     public ?string $created_at = null;
     public ?string $updated_at = null;
 
-    // New capital fields
+    // Capital fields
     public ?float $capital_quantity = null;
     public ?float $capital_weight_grams = null;
-    public ?int $capital_reference_carat = 750; // Default to 750
+    public ?int $capital_reference_carat = 750;
 
-    // Optional: To hold the category object if joined
+    // **NEW**: New tax columns that replace old ones
+    public string $vat_base_type = 'NONE'; // ENUM in DB: 'NONE', 'WAGE_PROFIT', 'PROFIT_ONLY'
+    public string $general_tax_base_type = 'NONE'; // ENUM in DB: 'NONE', 'WAGE_PROFIT', 'PROFIT_ONLY'
+    public ?float $tax_rate = null; // General tax rate percentage
+    public ?float $vat_rate = null; // VAT rate percentage
+
+    // Relational property (not a DB column)
     public ?ProductCategory $category = null;
 
-    public ?bool $tax_enabled = null;
-    public ?float $tax_rate = null;
-    public ?bool $vat_enabled = null;
-    public ?float $vat_rate = null;
+    // **DEPRECATED**: These properties are kept for compatibility during transition
+    // but should not be used for new logic. They correspond to columns that will be removed.
+    public ?float $quantity = null;
+    public ?float $weight = null;
+    public ?int $coin_year = null;
 
-    public function __construct(array $data = []) {
-        // Set defaults first
-        $this->is_active = true; // Default active state
-        $this->name = '';        // Default name
-        $this->category_id = null; // Default category
-        $this->unit_of_measure = 'gram'; // Added: Default UOM
-        $this->capital_reference_carat = 750; // Default capital carat
+    /**
+     * Constructor to hydrate the object from an associative array.
+     */
+    public function __construct(array $data = [])
+    {
+        // Set default values for new instances
+        $this->is_active = true;
+        $this->name = '';
+        $this->unit_of_measure = 'gram';
+        $this->capital_reference_carat = 750;
+        $this->vat_base_type = 'NONE';
+        $this->general_tax_base_type = 'NONE';
 
-        // Then hydrate from data if provided
         if (!empty($data)) {
-            $this->id = isset($data['id']) ? (int)$data['id'] : null;
-            $this->name = $data['name'] ?? ''; // Use ?? for safety, though default is set
-            $this->category_id = isset($data['category_id']) ? (int)$data['category_id'] : null;
-            $this->product_code = $data['product_code'] ?? null;
-            $this->unit_of_measure = $data['unit_of_measure'] ?? 'gram'; // Added: Hydrate UOM
-            $this->description = $data['description'] ?? null;
-            $this->default_carat = isset($data['default_carat']) ? (float)$data['default_carat'] : null;
-            $this->is_active = isset($data['is_active']) ? filter_var($data['is_active'], FILTER_VALIDATE_BOOLEAN) : true;
-            $this->quantity = isset($data['quantity']) ? (float)$data['quantity'] : null;
-            $this->weight = isset($data['weight']) ? (float)$data['weight'] : null;
-            $this->coin_year = isset($data['coin_year']) ? (int)$data['coin_year'] : null;
-            $this->created_at = $data['created_at'] ?? null;
-            $this->updated_at = $data['updated_at'] ?? null;
-
-            // Hydrate new capital fields
-            $this->capital_quantity = isset($data['capital_quantity']) ? (float)$data['capital_quantity'] : null;
-            $this->capital_weight_grams = isset($data['capital_weight_grams']) ? (float)$data['capital_weight_grams'] : null;
-            $this->capital_reference_carat = isset($data['capital_reference_carat']) ? (int)$data['capital_reference_carat'] : 750;
-
-            // If category data is passed directly (e.g., from a JOIN)
-            if ($this->category_id !== null && isset($data['category_name'])) {
+            // Hydrate properties that exist in the class from the data array
+            foreach ($data as $key => $value) {
+                if (property_exists($this, $key)) {
+                    // Special casting for boolean values for robustness
+                    if ($key === 'is_active') {
+                        $this->{$key} = filter_var($value, FILTER_VALIDATE_BOOLEAN);
+                    } else {
+                        $this->{$key} = $value;
+                    }
+                }
+            }
+            
+            // Hydrate the related category object if data is available from a JOIN query
+            if (isset($data['category_id'], $data['category_name'], $data['base_category'])) {
                 $this->category = new ProductCategory([
-                    'id' => $this->category_id,
+                    'id' => (int)$data['category_id'],
                     'name' => $data['category_name'],
-                    'code' => $data['category_code'] ?? null, // Example
+                    'code' => $data['category_code'] ?? null,
+                    'base_category' => $data['base_category']
                 ]);
             }
-
-            $this->vat_enabled = isset($data['vat_enabled']) ? filter_var($data['vat_enabled'], FILTER_VALIDATE_BOOLEAN) : null;
-            $this->vat_rate = isset($data['vat_rate']) ? (float)$data['vat_rate'] : null;
-            $this->tax_enabled = isset($data['tax_enabled']) ? filter_var($data['tax_enabled'], FILTER_VALIDATE_BOOLEAN) : null;
-            $this->tax_rate = isset($data['tax_rate']) ? (float)$data['tax_rate'] : null;
         }
     }
 
-    public function toArray(): array {
-        return [
-            'id' => $this->id,
-            'name' => $this->name,
-            'category_id' => $this->category_id,
-            'product_code' => $this->product_code,
-            'unit_of_measure' => $this->unit_of_measure, // Added
-            'description' => $this->description,
-            'default_carat' => $this->default_carat,
-            'is_active' => $this->is_active,
-            'created_at' => $this->created_at,
-            'updated_at' => $this->updated_at,
-            'quantity' => $this->quantity,
-            'weight' => $this->weight,
-            'coin_year' => $this->coin_year,
-            'capital_quantity' => $this->capital_quantity,
-            'capital_weight_grams' => $this->capital_weight_grams,
-            'capital_reference_carat' => $this->capital_reference_carat,
-            'category' => $this->category ? $this->category->toArray() : null,
-            'tax_enabled' => $this->tax_enabled,
-            'tax_rate' => $this->tax_rate,
-            'vat_enabled' => $this->vat_enabled,
-            'vat_rate' => $this->vat_rate,
-        ];
+    /**
+     * Converts the object to an associative array, ready for the database or JSON response.
+     * @return array
+     */
+    public function toArray(): array
+    {
+        // This simple method returns all public properties of the object.
+        // It's clean because the model properties directly reflect the desired output.
+        $properties = get_object_vars($this);
+
+        // If the category object exists, convert it to an array as well
+        if ($this->category instanceof ProductCategory) {
+            $properties['category'] = $this->category->toArray();
+        }
+
+        return $properties;
     }
 }
